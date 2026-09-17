@@ -1,3 +1,8 @@
 .clang-format
 .vscode/
 pyproject.toml
+core.so
+.venv/
+__pycache__/
+skipzfp.egg-info/
+.ruff_cache/
