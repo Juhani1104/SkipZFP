@@ -182,8 +182,8 @@ class SkipZFPCodec(ArrayBytesCodec):
     def __post_init__(self) -> None:
         if self.rate <= 0:
             raise ValueError("rate must be greater than 0")
-        if self.block_dim <= 0:
-            raise ValueError("block_dim must be greater than 0")
+        if self.block_dim != 4:
+            raise ValueError("SkipZFP currently requires block_dim=4")
 
     @classmethod
     def from_dict(cls, data: dict[str, JSON]) -> Self:
@@ -287,5 +287,3 @@ class SkipZFPCodec(ArrayBytesCodec):
             self.block_dim,
         )
         return chunk_spec.prototype.nd_buffer.from_ndarray_like(out)
-
-

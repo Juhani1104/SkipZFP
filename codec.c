@@ -6,9 +6,7 @@
 
 #include "core.h"
 
-
-static int mul_size(size_t a, size_t b, size_t* out)
-{
+static int mul_size(size_t a, size_t b, size_t* out) {
     if (out == NULL) {
         return 0;
     }
@@ -21,9 +19,7 @@ static int mul_size(size_t a, size_t b, size_t* out)
     return 1;
 }
 
-
-static int add_size(size_t a, size_t b, size_t* out)
-{
+static int add_size(size_t a, size_t b, size_t* out) {
     if (out == NULL) {
         return 0;
     }
@@ -35,7 +31,6 @@ static int add_size(size_t a, size_t b, size_t* out)
     *out = a + b;
     return 1;
 }
-
 
 static int calc_size(
     size_t nx,
@@ -69,18 +64,12 @@ static int calc_size(
         return 0;
     }
 
-    if (
-        nx % (size_t)block_dim != 0 ||
-        ny % (size_t)block_dim != 0 ||
-        nz % (size_t)block_dim != 0
-    ) {
+    if (nx % (size_t)block_dim != 0 || ny % (size_t)block_dim != 0 ||
+        nz % (size_t)block_dim != 0) {
         return 0;
     }
 
-    if (
-        !mul_size(nx, ny, &nxy) ||
-        !mul_size(nxy, nz, &nval)
-    ) {
+    if (!mul_size(nx, ny, &nxy) || !mul_size(nxy, nz, &nval)) {
         return 0;
     }
 
@@ -88,28 +77,21 @@ static int calc_size(
     by = ny / (size_t)block_dim;
     bz = nz / (size_t)block_dim;
 
-    if (
-        !mul_size(bx, by, &bxy) ||
-        !mul_size(bxy, bz, &nblk) ||
-        !mul_size(nblk, 2u, &off_size)
-    ) {
+    if (!mul_size(bx, by, &bxy) || !mul_size(bxy, bz, &nblk) ||
+        !mul_size(nblk, 2u, &off_size)) {
         return 0;
     }
 
     *data_size = (size_t)((double)nval * rate / 8.0);
     hdr_size = 3u * sizeof(float);
 
-    if (
-        *data_size == 0 ||
-        !add_size(hdr_size, off_size, meta_size) ||
-        !add_size(*data_size, *meta_size, pack_size)
-    ) {
+    if (*data_size == 0 || !add_size(hdr_size, off_size, meta_size) ||
+        !add_size(*data_size, *meta_size, pack_size)) {
         return 0;
     }
 
     return 1;
 }
-
 
 SzResult szfp_packed_size(
     size_t nx,
@@ -127,25 +109,13 @@ SzResult szfp_packed_size(
         return SZ_ERR_NULL;
     }
 
-    if (
-        !calc_size(
-            nx,
-            ny,
-            nz,
-            rate,
-            block_dim,
-            &data_size,
-            &meta_size,
-            &pack_size
-        )
-    ) {
+    if (!calc_size(nx, ny, nz, rate, block_dim, &data_size, &meta_size, &pack_size)) {
         return SZ_ERR_ARG;
     }
 
     *out_size = pack_size;
     return SZ_OK;
 }
-
 
 SzResult szfp_unpack_chunk(
     const unsigned char* packed,
@@ -172,10 +142,7 @@ SzResult szfp_unpack_chunk(
         return SZ_ERR_NULL;
     }
 
-    if (
-        !mul_size(nx, ny, &nxy) ||
-        !mul_size(nxy, nz, &nval)
-    ) {
+    if (!mul_size(nx, ny, &nxy) || !mul_size(nxy, nz, &nval)) {
         return SZ_ERR_SIZE;
     }
 
@@ -183,18 +150,7 @@ SzResult szfp_unpack_chunk(
         return SZ_ERR_SIZE;
     }
 
-    if (
-        !calc_size(
-            nx,
-            ny,
-            nz,
-            rate,
-            block_dim,
-            &data_size,
-            &meta_size,
-            &pack_size
-        )
-    ) {
+    if (!calc_size(nx, ny, nz, rate, block_dim, &data_size, &meta_size, &pack_size)) {
         return SZ_ERR_ARG;
     }
 
@@ -232,7 +188,6 @@ SzResult szfp_unpack_chunk(
     return ret == 0 ? SZ_ERR_DECOMPRESS : SZ_OK;
 }
 
-
 SzResult szfp_layout_size(
     size_t nx,
     size_t ny,
@@ -247,18 +202,7 @@ SzResult szfp_layout_size(
         return SZ_ERR_NULL;
     }
 
-    if (
-        !calc_size(
-            nx,
-            ny,
-            nz,
-            rate,
-            block_dim,
-            data_size,
-            meta_size,
-            pack_size
-        )
-    ) {
+    if (!calc_size(nx, ny, nz, rate, block_dim, data_size, meta_size, pack_size)) {
         return SZ_ERR_ARG;
     }
 

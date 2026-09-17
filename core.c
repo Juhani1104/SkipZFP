@@ -68,7 +68,7 @@ static int calc_layout(
         return 0;
     }
 
-    if (block_dim <= 0) {
+    if (block_dim != 4) {
         return 0;
     }
 
@@ -214,13 +214,16 @@ SzResult szfp_pack_chunk(
     bitstream* stream;
     zfp_stream* zfp;
     zfp_field* field;
-    float* dec;
+    float* block_mins;
+    float* block_maxs;
     float cmin;
     float cmax;
     float eps;
     unsigned char* meta;
     unsigned char* offs;
     size_t ret;
+    size_t block_nbytes;
+    size_t minmax_bytes;
 
     if (chunk == NULL || out == NULL || out_size == NULL) {
         return SZ_ERR_NULL;
@@ -265,41 +268,71 @@ SzResult szfp_pack_chunk(
         return SZ_ERR_COMPRESS;
     }
 
-    dec = (float*)malloc(lt.nval * sizeof(float));
-    if (dec == NULL) {
-        return SZ_ERR_MALLOC;
+    if (lt.nblk == 0 || lt.data_size % lt.nblk != 0) {
+        return SZ_ERR_SIZE;
     }
 
-    {
-        SzResult code = decode_chunk(out, lt.data_size, nx, ny, nz, rate, dec);
-        if (code != SZ_OK) {
-            free(dec);
-            return code;
-        }
+    block_nbytes = lt.data_size / lt.nblk;
+
+    if (block_nbytes == 0 || (double)block_nbytes != 64.0 * rate / 8.0) {
+        return SZ_ERR_ARG;
+    }
+
+    if (!mul_size(lt.nblk, sizeof(float), &minmax_bytes)) {
+        return SZ_ERR_SIZE;
+    }
+
+    block_mins = (float*)malloc(minmax_bytes);
+    block_maxs = (float*)malloc(minmax_bytes);
+
+    if (block_mins == NULL || block_maxs == NULL) {
+        free(block_mins);
+        free(block_maxs);
+        return SZ_ERR_MALLOC;
     }
 
     cmin = FLT_MAX;
     cmax = -FLT_MAX;
     eps = 0.0f;
 
-    for (size_t i = 0; i < lt.nval; i++) {
-        float v = chunk[i];
-        float err = fabsf(v - dec[i]);
+    for (size_t block_id = 0; block_id < lt.nblk; block_id++) {
+        float block[64];
+        float bmin = FLT_MAX;
+        float bmax = -FLT_MAX;
 
-        if (v < cmin) {
-            cmin = v;
+        SzResult code = szfp_decompress_block(
+            out + block_id * block_nbytes, block_nbytes, rate, zfp_type_float, 3, block
+        );
+
+        if (code != SZ_OK) {
+            free(block_mins);
+            free(block_maxs);
+            return code;
         }
 
-        if (v > cmax) {
-            cmax = v;
+        for (size_t i = 0; i < 64; i++) {
+            float v = block[i];
+
+            if (v < bmin) {
+                bmin = v;
+            }
+
+            if (v > bmax) {
+                bmax = v;
+            }
         }
 
-        if (err > eps) {
-            eps = err;
+        block_mins[block_id] = bmin;
+        block_maxs[block_id] = bmax;
+
+        if (bmin < cmin) {
+            cmin = bmin;
+        }
+
+        if (bmax > cmax) {
+            cmax = bmax;
         }
     }
-
-    free(dec);
 
     meta = out + lt.data_size;
     memcpy(meta, &cmin, sizeof(float));
@@ -314,44 +347,19 @@ SzResult szfp_pack_chunk(
         double span = (double)cmax - (double)cmin;
         double scale = 255.0 / span;
 
-        for (size_t bx = 0; bx < lt.bx; bx++) {
-            for (size_t by = 0; by < lt.by; by++) {
-                for (size_t bz = 0; bz < lt.bz; bz++) {
-                    float bmin = FLT_MAX;
-                    float bmax = -FLT_MAX;
+        for (size_t block_id = 0; block_id < lt.nblk; block_id++) {
+            int min_off =
+                (int)floor(((double)block_mins[block_id] - (double)cmin) * scale);
 
-                    for (int dx = 0; dx < block_dim; dx++) {
-                        for (int dy = 0; dy < block_dim; dy++) {
-                            for (int dz = 0; dz < block_dim; dz++) {
-                                size_t x = bx * (size_t)block_dim + (size_t)dx;
-                                size_t y = by * (size_t)block_dim + (size_t)dy;
-                                size_t z = bz * (size_t)block_dim + (size_t)dz;
-                                float v = chunk[get_index3(x, y, z, ny, nz)];
+            int max_off =
+                (int)ceil(((double)block_maxs[block_id] - (double)cmin) * scale);
 
-                                if (v < bmin) {
-                                    bmin = v;
-                                }
-
-                                if (v > bmax) {
-                                    bmax = v;
-                                }
-                            }
-                        }
-                    }
-
-                    {
-                        int min_off = (int)lround(((double)bmin - cmin) * scale);
-                        int max_off = (int)lround(((double)bmax - cmin) * scale);
-                        size_t id = bx * (lt.by * lt.bz) + by * lt.bz + bz;
-
-                        offs[id * 2u] = to_u8(min_off);
-                        offs[id * 2u + 1u] = to_u8(max_off);
-                    }
-                }
-            }
+            offs[block_id * 2u] = to_u8(min_off);
+            offs[block_id * 2u + 1u] = to_u8(max_off);
         }
     }
-
+    free(block_mins);
+    free(block_maxs);
     *out_size = lt.pack_size;
     return SZ_OK;
 }
