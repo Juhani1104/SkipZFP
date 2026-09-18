@@ -6,3 +6,4 @@ core.so
 __pycache__/
 skipzfp.egg-info/
 .ruff_cache/
+data/
