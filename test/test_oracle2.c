@@ -8,9 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "core.h"
-
-
+#include "../core.h"
 
 enum {
     SIDE = 32,
@@ -39,24 +37,20 @@ static double noise_neighbor_mad;
 
 static unsigned char packed[PACKED_BYTES];
 
-
-
-
 static int decode_prefix(
-    const unsigned char *source,
+    const unsigned char* source,
     size_t prefix_bytes,
     double rate,
     float output[BLOCK_VALUES]
 ) {
     unsigned char padded[FULL_BLOCK_BYTES] = {0};
 
-    bitstream *bs = NULL;
-    zfp_stream *zfp = NULL;
+    bitstream* bs = NULL;
+    zfp_stream* zfp = NULL;
     size_t consumed = 0;
 
     if (prefix_bytes == 0 || prefix_bytes > FULL_BLOCK_BYTES)
         return 0;
-
 
     memcpy(padded, source, prefix_bytes);
 
@@ -71,9 +65,7 @@ static int decode_prefix(
         return 0;
     }
 
-    double actual_rate = zfp_stream_set_rate(
-        zfp, rate, zfp_type_float, 3, 0
-    );
+    double actual_rate = zfp_stream_set_rate(zfp, rate, zfp_type_float, 3, 0);
 
     if (fabs(actual_rate - rate) < 1e-9) {
         zfp_stream_rewind(zfp);
@@ -85,16 +77,11 @@ static int decode_prefix(
     zfp_stream_close(zfp);
     stream_close(bs);
 
-    return consumed != 0 &&
-           consumed <= prefix_bytes * 8u;
+    return consumed != 0 && consumed <= prefix_bytes * 8u;
 }
 
-
-
-
 static int make_spatial_noise(int sample, int passes) {
-    uint32_t state =
-        sample == 0 ? 0x12345678u : 0x87654321u;
+    uint32_t state = sample == 0 ? 0x12345678u : 0x87654321u;
 
     /*
      * Same initial noise within each sample family,
@@ -105,32 +92,21 @@ static int make_spatial_noise(int sample, int passes) {
         state ^= state >> 17;
         state ^= state << 5;
 
-        noise_field[i] =
-            2.0f * (float)(state & 0x00ffffffu) /
-            16777215.0f - 1.0f;
+        noise_field[i] = 2.0f * (float)(state & 0x00ffffffu) / 16777215.0f - 1.0f;
     }
-
 
     for (int pass = 0; pass < passes; ++pass) {
         for (size_t z = 0; z < SIDE; ++z) {
-            size_t zs[3] = {
-                z == 0 ? SIDE - 1 : z - 1,
-                z,
-                z + 1 == SIDE ? 0 : z + 1
-            };
+            size_t zs[3] = {z == 0 ? SIDE - 1 : z - 1, z, z + 1 == SIDE ? 0 : z + 1};
 
             for (size_t y = 0; y < SIDE; ++y) {
                 size_t ys[3] = {
-                    y == 0 ? SIDE - 1 : y - 1,
-                    y,
-                    y + 1 == SIDE ? 0 : y + 1
+                    y == 0 ? SIDE - 1 : y - 1, y, y + 1 == SIDE ? 0 : y + 1
                 };
 
                 for (size_t x = 0; x < SIDE; ++x) {
                     size_t xs[3] = {
-                        x == 0 ? SIDE - 1 : x - 1,
-                        x,
-                        x + 1 == SIDE ? 0 : x + 1
+                        x == 0 ? SIDE - 1 : x - 1, x, x + 1 == SIDE ? 0 : x + 1
                     };
 
                     double sum = 0.0;
@@ -138,9 +114,7 @@ static int make_spatial_noise(int sample, int passes) {
                     for (int dz = 0; dz < 3; ++dz) {
                         for (int dy = 0; dy < 3; ++dy) {
                             for (int dx = 0; dx < 3; ++dx) {
-                                size_t j =
-                                    xs[dx] +
-                                    SIDE * (ys[dy] + SIDE * zs[dz]);
+                                size_t j = xs[dx] + SIDE * (ys[dy] + SIDE * zs[dz]);
 
                                 sum += noise_field[j];
                             }
@@ -155,7 +129,6 @@ static int make_spatial_noise(int sample, int passes) {
 
         memcpy(noise_field, noise_tmp, sizeof(noise_field));
     }
-
 
     double mean = 0.0;
     double variance = 0.0;
@@ -176,11 +149,8 @@ static int make_spatial_noise(int sample, int passes) {
         return 0;
 
     for (size_t i = 0; i < VALUES; ++i) {
-        noise_field[i] = (float)(
-            ((double)noise_field[i] - mean) / stddev
-        );
+        noise_field[i] = (float)(((double)noise_field[i] - mean) / stddev);
     }
-
 
     double total_diff = 0.0;
     size_t pairs = 0;
@@ -191,25 +161,20 @@ static int make_spatial_noise(int sample, int passes) {
                 size_t i = x + SIDE * (y + SIDE * z);
 
                 if (x + 1 < SIDE) {
-                    total_diff += fabs(
-                        (double)noise_field[i] -
-                        (double)noise_field[i + 1]
-                    );
+                    total_diff +=
+                        fabs((double)noise_field[i] - (double)noise_field[i + 1]);
                     ++pairs;
                 }
 
                 if (y + 1 < SIDE) {
-                    total_diff += fabs(
-                        (double)noise_field[i] -
-                        (double)noise_field[i + SIDE]
-                    );
+                    total_diff +=
+                        fabs((double)noise_field[i] - (double)noise_field[i + SIDE]);
                     ++pairs;
                 }
 
                 if (z + 1 < SIDE) {
                     total_diff += fabs(
-                        (double)noise_field[i] -
-                        (double)noise_field[i + SIDE * SIDE]
+                        (double)noise_field[i] - (double)noise_field[i + SIDE * SIDE]
                     );
                     ++pairs;
                 }
@@ -221,9 +186,6 @@ static int make_spatial_noise(int sample, int passes) {
     return 1;
 }
 
-
-
-
 static int make_sample(int sample, int smooth_passes) {
     for (size_t i = 0; i < VALUES; ++i) {
         float x = (float)(i % SIDE);
@@ -231,29 +193,20 @@ static int make_sample(int sample, int smooth_passes) {
         float z = (float)(i / (SIDE * SIDE));
 
         if (sample == 0) {
-            input[i] =
-                280.0f +
-                0.13f * x +
-                0.09f * y +
-                0.06f * z +
-                0.15f * sinf(0.3f * x + 0.2f * y);
+            input[i] = 280.0f + 0.13f * x + 0.09f * y + 0.06f * z +
+                       0.15f * sinf(0.3f * x + 0.2f * y);
 
         } else if (sample == 1) {
             input[i] =
-                6.0f * sinf(0.23f * x + 0.11f * z) -
-                4.0f * cosf(0.19f * y) +
-                0.07f * z;
+                6.0f * sinf(0.23f * x + 0.11f * z) - 4.0f * cosf(0.19f * y) + 0.07f * z;
 
         } else {
             /* Unchanged irregular control. */
-            input[i] =
-                (float)((i * 73u + 19u) % 211u) *
-                0.19f - 17.0f;
+            input[i] = (float)((i * 73u + 19u) % 211u) * 0.19f - 17.0f;
         }
     }
 
     noise_neighbor_mad = 0.0;
-
 
     if (sample != 2 && smooth_passes >= 0) {
         if (!make_spatial_noise(sample, smooth_passes))
@@ -268,24 +221,20 @@ static int make_sample(int sample, int smooth_passes) {
     return 1;
 }
 
-
-static int compare_float(const void *a, const void *b) {
-    float x = *(const float *)a;
-    float y = *(const float *)b;
+static int compare_float(const void* a, const void* b) {
+    float x = *(const float*)a;
+    float y = *(const float*)b;
 
     return (x > y) - (x < y);
 }
 
-
-
-
 static void metadata_interval(
-    const unsigned char *offsets,
+    const unsigned char* offsets,
     size_t block_id,
     double cmin,
     double cmax,
-    double *lower,
-    double *upper
+    double* lower,
+    double* upper
 ) {
     double span = cmax - cmin;
 
@@ -297,23 +246,13 @@ static void metadata_interval(
 
     double delta = span / 255.0;
 
-    double lo =
-        cmin +
-        ((double)offsets[2u * block_id] / 255.0) * span -
-        delta;
+    double lo = cmin + ((double)offsets[2u * block_id] / 255.0) * span - delta;
 
-    double hi =
-        cmin +
-        ((double)offsets[2u * block_id + 1u] / 255.0) * span +
-        delta;
+    double hi = cmin + ((double)offsets[2u * block_id + 1u] / 255.0) * span + delta;
 
-    
     *lower = nextafter(lo, -INFINITY);
     *upper = nextafter(hi, INFINITY);
 }
-
-
-
 
 static int prepare_sample(int sample, int smooth_passes) {
     size_t written = 0;
@@ -324,41 +263,32 @@ static int prepare_sample(int sample, int smooth_passes) {
     }
 
     SzResult result = szfp_pack_chunk(
-        input,
-        SIDE, SIDE, SIDE,
-        8.0, 4,
-        packed,
-        sizeof(packed),
-        &written
+        input, SIDE, SIDE, SIDE, 8.0, 4, packed, sizeof(packed), &written
     );
 
     if (result != SZ_OK || written != sizeof(packed)) {
         fprintf(
             stderr,
             "FAIL: packing sample=%d passes=%d code=%d size=%zu\n",
-            sample, smooth_passes, (int)result, written
+            sample,
+            smooth_passes,
+            (int)result,
+            written
         );
         return 0;
     }
 
-
     for (size_t b = 0; b < BLOCKS; ++b) {
-        const unsigned char *payload =
-            packed + b * FULL_BLOCK_BYTES;
+        const unsigned char* payload = packed + b * FULL_BLOCK_BYTES;
 
         for (size_t level = 0; level < LEVELS; ++level) {
             size_t prefix_bytes = 16u * (level + 1u);
 
             if (!decode_prefix(
-                    payload,
-                    prefix_bytes,
-                    rates[level],
-                    decoded[level][b]
+                    payload, prefix_bytes, rates[level], decoded[level][b]
                 )) {
                 fprintf(
-                    stderr,
-                    "FAIL: prefix decode block=%zu rate=%.0f\n",
-                    b, rates[level]
+                    stderr, "FAIL: prefix decode block=%zu rate=%.0f\n", b, rates[level]
                 );
                 return 0;
             }
@@ -369,7 +299,8 @@ static int prepare_sample(int sample, int smooth_passes) {
                         stderr,
                         "FAIL: non-finite decoded value "
                         "block=%zu rate=%.0f\n",
-                        b, rates[level]
+                        b,
+                        rates[level]
                     );
                     return 0;
                 }
@@ -393,9 +324,8 @@ static int prepare_sample(int sample, int smooth_passes) {
         block_max[b] = bmax;
     }
 
-
-    const unsigned char *meta = packed + VALUES;
-    const unsigned char *offsets = meta + 12u;
+    const unsigned char* meta = packed + VALUES;
+    const unsigned char* offsets = meta + 12u;
 
     float cmin_f;
     float cmax_f;
@@ -403,9 +333,7 @@ static int prepare_sample(int sample, int smooth_passes) {
     memcpy(&cmin_f, meta, sizeof(float));
     memcpy(&cmax_f, meta + sizeof(float), sizeof(float));
 
-    if (!isfinite(cmin_f) ||
-        !isfinite(cmax_f) ||
-        cmax_f < cmin_f) {
+    if (!isfinite(cmin_f) || !isfinite(cmax_f) || cmax_f < cmin_f) {
         fprintf(stderr, "FAIL: invalid metadata header\n");
         return 0;
     }
@@ -416,21 +344,13 @@ static int prepare_sample(int sample, int smooth_passes) {
     for (size_t b = 0; b < BLOCKS; ++b) {
         double lower, upper;
 
-        metadata_interval(
-            offsets, b, cmin, cmax, &lower, &upper
-        );
+        metadata_interval(offsets, b, cmin, cmax, &lower, &upper);
 
-        if ((double)block_min[b] < lower ||
-            (double)block_max[b] > upper) {
-            fprintf(
-                stderr,
-                "FAIL: metadata does not cover block %zu\n",
-                b
-            );
+        if ((double)block_min[b] < lower || (double)block_max[b] > upper) {
+            fprintf(stderr, "FAIL: metadata does not cover block %zu\n", b);
             return 0;
         }
     }
-
 
     for (size_t level = 0; level < LEVELS; ++level) {
         double largest_chunk_error = 0.0;
@@ -439,37 +359,27 @@ static int prepare_sample(int sample, int smooth_passes) {
             double largest_block_error = 0.0;
 
             for (size_t i = 0; i < BLOCK_VALUES; ++i) {
-                double error = fabs(
-                    (double)decoded[3][b][i] -
-                    (double)decoded[level][b][i]
-                );
+                double error =
+                    fabs((double)decoded[3][b][i] - (double)decoded[level][b][i]);
 
                 if (error > largest_block_error)
                     largest_block_error = error;
             }
 
-            block_eps[level][b] =
-                largest_block_error == 0.0
-                ? 0.0
-                : nextafter(largest_block_error, INFINITY);
+            block_eps[level][b] = largest_block_error == 0.0
+                                      ? 0.0
+                                      : nextafter(largest_block_error, INFINITY);
 
             if (block_eps[level][b] > largest_chunk_error)
                 largest_chunk_error = block_eps[level][b];
         }
 
         chunk_eps[level] =
-            largest_chunk_error == 0.0
-            ? 0.0
-            : nextafter(largest_chunk_error, INFINITY);
+            largest_chunk_error == 0.0 ? 0.0 : nextafter(largest_chunk_error, INFINITY);
     }
 
-
     for (size_t b = 0; b < BLOCKS; ++b) {
-        memcpy(
-            sorted + b * BLOCK_VALUES,
-            decoded[3][b],
-            sizeof(decoded[3][b])
-        );
+        memcpy(sorted + b * BLOCK_VALUES, decoded[3][b], sizeof(decoded[3][b]));
     }
 
     qsort(sorted, VALUES, sizeof(float), compare_float);
@@ -477,15 +387,12 @@ static int prepare_sample(int sample, int smooth_passes) {
     return 1;
 }
 
-
-
-
 static int undecided_count(
     const float approx[BLOCK_VALUES],
     const float reference[BLOCK_VALUES],
     double eps,
     double threshold,
-    size_t *unknown
+    size_t* unknown
 ) {
     size_t count = 0;
 
@@ -512,12 +419,9 @@ static int undecided_count(
     return 1;
 }
 
-
-
-
 static int evaluate_threshold(double target_selectivity) {
-    const unsigned char *meta = packed + VALUES;
-    const unsigned char *offsets = meta + 12u;
+    const unsigned char* meta = packed + VALUES;
+    const unsigned char* offsets = meta + 12u;
 
     float cmin_f, cmax_f;
 
@@ -527,9 +431,7 @@ static int evaluate_threshold(double target_selectivity) {
     double cmin = (double)cmin_f;
     double cmax = (double)cmax_f;
 
-    size_t desired = (size_t)llround(
-        target_selectivity * (double)VALUES
-    );
+    size_t desired = (size_t)llround(target_selectivity * (double)VALUES);
 
     if (desired < 1u)
         desired = 1u;
@@ -537,8 +439,7 @@ static int evaluate_threshold(double target_selectivity) {
     if (desired >= VALUES)
         desired = VALUES - 1u;
 
-    double threshold =
-        (double)sorted[VALUES - desired - 1u];
+    double threshold = (double)sorted[VALUES - desired - 1u];
 
     size_t actual = 0;
 
@@ -559,10 +460,7 @@ static int evaluate_threshold(double target_selectivity) {
     for (size_t b = 0; b < BLOCKS; ++b) {
         double lower, upper;
 
-        metadata_interval(
-            offsets, b, cmin, cmax, &lower, &upper
-        );
-
+        metadata_interval(offsets, b, cmin, cmax, &lower, &upper);
 
         if (upper <= threshold) {
             if ((double)block_max[b] > threshold) {
@@ -579,7 +477,6 @@ static int evaluate_threshold(double target_selectivity) {
             }
             continue;
         }
-
 
         ++maybe_blocks;
         static_bytes += FULL_BLOCK_BYTES;
@@ -602,7 +499,8 @@ static int evaluate_threshold(double target_selectivity) {
                     stderr,
                     "FAIL: unsafe chunk-bound decision "
                     "block=%zu level=%zu\n",
-                    b, level
+                    b,
+                    level
                 );
                 return 0;
             }
@@ -618,14 +516,14 @@ static int evaluate_threshold(double target_selectivity) {
                     stderr,
                     "FAIL: unsafe block-bound decision "
                     "block=%zu level=%zu\n",
-                    b, level
+                    b,
+                    level
                 );
                 return 0;
             }
 
             if (level < 3u)
                 unknown_chunk[level] += pending_chunk;
-
 
             if (need_chunk == 0u && pending_chunk == 0u)
                 need_chunk = 16u * (level + 1u);
@@ -635,11 +533,7 @@ static int evaluate_threshold(double target_selectivity) {
         }
 
         if (need_chunk == 0u || need_block == 0u) {
-            fprintf(
-                stderr,
-                "FAIL: highest precision did not resolve block %zu\n",
-                b
-            );
+            fprintf(stderr, "FAIL: highest precision did not resolve block %zu\n", b);
             return 0;
         }
 
@@ -694,53 +588,34 @@ static int evaluate_threshold(double target_selectivity) {
     return 1;
 }
 
-
-
-
 int main(void) {
-    const char *names[] = {
-        "temperature-like",
-        "wind-like",
-        "irregular"
-    };
+    const char* names[] = {"temperature-like", "wind-like", "irregular"};
 
     const int smoothness[] = {-1, 0, 1, 2, 4, 8};
 
     const double selectivities[] = {
-        0.0001,  /* 0.01% */
-        0.001,   /* 0.1%  */
-        0.01,    /* 1%    */
-        0.10,    /* 10%   */
-        0.50,    /* 50%   */
-        0.90     /* 90%   */
+        0.0001, /* 0.01% */
+        0.001,  /* 0.1%  */
+        0.01,   /* 1%    */
+        0.10,   /* 10%   */
+        0.50,   /* 50%   */
+        0.90    /* 90%   */
     };
 
-
-
     for (int sample = 0; sample < 3; ++sample) {
-        size_t runs =
-            sample == 2
-            ? 1u
-            : sizeof(smoothness) / sizeof(smoothness[0]);
+        size_t runs = sample == 2 ? 1u : sizeof(smoothness) / sizeof(smoothness[0]);
 
         for (size_t s = 0; s < runs; ++s) {
-            int passes =
-                sample == 2 ? -1 : smoothness[s];
+            int passes = sample == 2 ? -1 : smoothness[s];
 
             if (!prepare_sample(sample, passes))
                 return 1;
 
             if (sample == 2) {
-                printf(
-                    "\n=== %s: unchanged control ===\n",
-                    names[sample]
-                );
+                printf("\n=== %s: unchanged control ===\n", names[sample]);
 
             } else if (passes == -1) {
-                printf(
-                    "\n=== %s: original, no added noise ===\n",
-                    names[sample]
-                );
+                printf("\n=== %s: original, no added noise ===\n", names[sample]);
 
             } else {
                 printf(
@@ -760,16 +635,10 @@ int main(void) {
                 chunk_eps[2]
             );
 
-            for (size_t i = 0;
-                 i < sizeof(selectivities) /
-                     sizeof(selectivities[0]);
+            for (size_t i = 0; i < sizeof(selectivities) / sizeof(selectivities[0]);
                  ++i) {
                 if (!evaluate_threshold(selectivities[i])) {
-                    fprintf(
-                        stderr,
-                        "FAIL: sample=%d passes=%d\n",
-                        sample, passes
-                    );
+                    fprintf(stderr, "FAIL: sample=%d passes=%d\n", sample, passes);
                     return 1;
                 }
             }

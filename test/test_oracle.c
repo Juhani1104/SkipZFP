@@ -8,9 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "core.h"
-
-
+#include "../core.h"
 
 enum {
     SIDE = 32,
@@ -34,14 +32,14 @@ static unsigned char packed[PACKED_BYTES];
 static const double rates[LEVELS] = {2.0, 4.0, 6.0, 8.0};
 
 static int decode_prefix(
-    const unsigned char *source,
+    const unsigned char* source,
     size_t prefix_bytes,
     double rate,
     float output[BLOCK_VALUES]
 ) {
     unsigned char padded[FULL_BLOCK_BYTES] = {0};
-    bitstream *bs = NULL;
-    zfp_stream *zfp = NULL;
+    bitstream* bs = NULL;
+    zfp_stream* zfp = NULL;
     size_t consumed = 0;
 
     if (prefix_bytes > FULL_BLOCK_BYTES)
@@ -59,9 +57,7 @@ static int decode_prefix(
         return 0;
     }
 
-    if (fabs(zfp_stream_set_rate(
-            zfp, rate, zfp_type_float, 3, 0
-        ) - rate) < 1e-9) {
+    if (fabs(zfp_stream_set_rate(zfp, rate, zfp_type_float, 3, 0) - rate) < 1e-9) {
         zfp_stream_rewind(zfp);
         consumed = zfp_decode_block_float_3(zfp, output);
     }
@@ -69,8 +65,7 @@ static int decode_prefix(
     zfp_stream_close(zfp);
     stream_close(bs);
 
-    return consumed != 0 &&
-           consumed <= prefix_bytes * 8u;
+    return consumed != 0 && consumed <= prefix_bytes * 8u;
 }
 
 static void make_sample(int sample) {
@@ -81,37 +76,31 @@ static void make_sample(int sample) {
 
         if (sample == 0) {
             /* Temperature-like smooth field. */
-            input[i] =
-                280.0f + 0.13f * x + 0.09f * y +
-                0.06f * z + 0.15f * sinf(0.3f * x + 0.2f * y);
+            input[i] = 280.0f + 0.13f * x + 0.09f * y + 0.06f * z +
+                       0.15f * sinf(0.3f * x + 0.2f * y);
         } else if (sample == 1) {
             /* Signed wind-like field. */
             input[i] =
-                6.0f * sinf(0.23f * x + 0.11f * z) -
-                4.0f * cosf(0.19f * y) +
-                0.07f * z;
+                6.0f * sinf(0.23f * x + 0.11f * z) - 4.0f * cosf(0.19f * y) + 0.07f * z;
         } else {
             /* Irregular field to avoid testing smooth data only. */
-            input[i] =
-                (float)((i * 73u + 19u) % 211u) * 0.19f -
-                17.0f;
+            input[i] = (float)((i * 73u + 19u) % 211u) * 0.19f - 17.0f;
         }
     }
 }
 
-static int compare_float(const void *a, const void *b) {
-    float x = *(const float *)a;
-    float y = *(const float *)b;
+static int compare_float(const void* a, const void* b) {
+    float x = *(const float*)a;
+    float y = *(const float*)b;
     return (x > y) - (x < y);
 }
-
 
 static int undecided_count(
     const float approx[BLOCK_VALUES],
     const float reference[BLOCK_VALUES],
     double eps,
     double threshold,
-    size_t *unknown
+    size_t* unknown
 ) {
     size_t count = 0;
 
@@ -143,32 +132,37 @@ static int prepare_sample(int sample) {
     make_sample(sample);
 
     result = szfp_pack_chunk(
-        input, SIDE, SIDE, SIDE,
-        8.0, 4,
-        packed, sizeof(packed), &written
+        input, SIDE, SIDE, SIDE, 8.0, 4, packed, sizeof(packed), &written
     );
 
     if (result != SZ_OK || written != sizeof(packed)) {
-        fprintf(stderr,
-                "FAIL: packing sample %d, code=%d, size=%zu\n",
-                sample, (int)result, written);
+        fprintf(
+            stderr,
+            "FAIL: packing sample %d, code=%d, size=%zu\n",
+            sample,
+            (int)result,
+            written
+        );
         return 0;
     }
 
     for (size_t b = 0; b < BLOCKS; ++b) {
-        const unsigned char *payload =
-            packed + b * FULL_BLOCK_BYTES;
+        const unsigned char* payload = packed + b * FULL_BLOCK_BYTES;
 
         for (size_t level = 0; level < LEVELS; ++level) {
             size_t prefix_bytes = 16u * (level + 1u);
 
             if (!decode_prefix(
-                    payload, prefix_bytes, rates[level],
-                    decoded[level][b])) {
-                fprintf(stderr,
-                        "FAIL: prefix decode sample=%d block=%zu "
-                        "rate=%.0f\n",
-                        sample, b, rates[level]);
+                    payload, prefix_bytes, rates[level], decoded[level][b]
+                )) {
+                fprintf(
+                    stderr,
+                    "FAIL: prefix decode sample=%d block=%zu "
+                    "rate=%.0f\n",
+                    sample,
+                    b,
+                    rates[level]
+                );
                 return 0;
             }
         }
@@ -194,9 +188,8 @@ static int prepare_sample(int sample) {
         block_max[b] = bmax;
     }
 
-
-    const unsigned char *meta = packed + VALUES;
-    const unsigned char *offsets = meta + 12u;
+    const unsigned char* meta = packed + VALUES;
+    const unsigned char* offsets = meta + 12u;
 
     memcpy(&cmin, meta, sizeof(float));
     memcpy(&cmax, meta + sizeof(float), sizeof(float));
@@ -209,7 +202,6 @@ static int prepare_sample(int sample) {
     span = (double)cmax - (double)cmin;
     delta = span / 255.0;
 
-
     for (size_t b = 0; b < BLOCKS; ++b) {
         double lower, upper;
 
@@ -217,25 +209,17 @@ static int prepare_sample(int sample) {
             lower = cmin;
             upper = cmax;
         } else {
-            lower =
-                (double)cmin +
-                ((double)offsets[2u * b] / 255.0) * span -
-                delta;
+            lower = (double)cmin + ((double)offsets[2u * b] / 255.0) * span - delta;
 
             upper =
-                (double)cmin +
-                ((double)offsets[2u * b + 1u] / 255.0) * span +
-                delta;
+                (double)cmin + ((double)offsets[2u * b + 1u] / 255.0) * span + delta;
         }
 
-        if ((double)block_min[b] < lower ||
-            (double)block_max[b] > upper) {
-            fprintf(stderr,
-                    "FAIL: metadata does not cover block %zu\n", b);
+        if ((double)block_min[b] < lower || (double)block_max[b] > upper) {
+            fprintf(stderr, "FAIL: metadata does not cover block %zu\n", b);
             return 0;
         }
     }
-
 
     for (size_t level = 0; level < LEVELS; ++level) {
         double largest_chunk_error = 0.0;
@@ -244,47 +228,36 @@ static int prepare_sample(int sample) {
             double largest_block_error = 0.0;
 
             for (size_t i = 0; i < BLOCK_VALUES; ++i) {
-                double error = fabs(
-                    (double)decoded[3][b][i] -
-                    (double)decoded[level][b][i]
-                );
+                double error =
+                    fabs((double)decoded[3][b][i] - (double)decoded[level][b][i]);
 
                 if (error > largest_block_error)
                     largest_block_error = error;
             }
 
-            block_eps[level][b] =
-                largest_block_error == 0.0
-                ? 0.0
-                : nextafter(largest_block_error, INFINITY);
+            block_eps[level][b] = largest_block_error == 0.0
+                                      ? 0.0
+                                      : nextafter(largest_block_error, INFINITY);
 
             if (block_eps[level][b] > largest_chunk_error)
                 largest_chunk_error = block_eps[level][b];
         }
 
         chunk_eps[level] =
-            largest_chunk_error == 0.0
-            ? 0.0
-            : nextafter(largest_chunk_error, INFINITY);
+            largest_chunk_error == 0.0 ? 0.0 : nextafter(largest_chunk_error, INFINITY);
     }
 
     for (size_t b = 0; b < BLOCKS; ++b) {
-        memcpy(
-            sorted + b * BLOCK_VALUES,
-            decoded[3][b],
-            sizeof(decoded[3][b])
-        );
+        memcpy(sorted + b * BLOCK_VALUES, decoded[3][b], sizeof(decoded[3][b]));
     }
 
     qsort(sorted, VALUES, sizeof(float), compare_float);
     return 1;
 }
 
-static int evaluate_threshold(
-    double requested_selectivity
-) {
-    const unsigned char *meta = packed + VALUES;
-    const unsigned char *offsets = meta + 12u;
+static int evaluate_threshold(double requested_selectivity) {
+    const unsigned char* meta = packed + VALUES;
+    const unsigned char* offsets = meta + 12u;
 
     float cmin, cmax;
     double span, delta, threshold;
@@ -304,9 +277,7 @@ static int evaluate_threshold(
     span = (double)cmax - (double)cmin;
     delta = span / 255.0;
 
-    desired = (size_t)llround(
-        requested_selectivity * (double)VALUES
-    );
+    desired = (size_t)llround(requested_selectivity * (double)VALUES);
 
     if (desired < 1u)
         desired = 1u;
@@ -327,18 +298,12 @@ static int evaluate_threshold(
             lower = cmin;
             upper = cmax;
         } else {
-            lower =
-                (double)cmin +
-                ((double)offsets[2u * b] / 255.0) * span -
-                delta;
+            lower = (double)cmin + ((double)offsets[2u * b] / 255.0) * span - delta;
 
             upper =
-                (double)cmin +
-                ((double)offsets[2u * b + 1u] / 255.0) * span +
-                delta;
+                (double)cmin + ((double)offsets[2u * b + 1u] / 255.0) * span + delta;
         }
 
-        
         if (upper <= threshold) {
             if ((double)block_max[b] > threshold)
                 return 0;
@@ -366,11 +331,15 @@ static int evaluate_threshold(
                     decoded[3][b],
                     chunk_eps[level],
                     threshold,
-                    &pending_chunk)) {
-                fprintf(stderr,
-                        "FAIL: invalid chunk-bound decision "
-                        "block=%zu level=%zu\n",
-                        b, level);
+                    &pending_chunk
+                )) {
+                fprintf(
+                    stderr,
+                    "FAIL: invalid chunk-bound decision "
+                    "block=%zu level=%zu\n",
+                    b,
+                    level
+                );
                 return 0;
             }
 
@@ -379,11 +348,15 @@ static int evaluate_threshold(
                     decoded[3][b],
                     block_eps[level][b],
                     threshold,
-                    &pending_block)) {
-                fprintf(stderr,
-                        "FAIL: invalid block-bound decision "
-                        "block=%zu level=%zu\n",
-                        b, level);
+                    &pending_block
+                )) {
+                fprintf(
+                    stderr,
+                    "FAIL: invalid block-bound decision "
+                    "block=%zu level=%zu\n",
+                    b,
+                    level
+                );
                 return 0;
             }
 
@@ -398,9 +371,12 @@ static int evaluate_threshold(
         }
 
         if (need_chunk == 0u || need_block == 0u) {
-            fprintf(stderr,
-                    "FAIL: 8-bit reference did not resolve "
-                    "block %zu\n", b);
+            fprintf(
+                stderr,
+                "FAIL: 8-bit reference did not resolve "
+                "block %zu\n",
+                b
+            );
             return 0;
         }
 
@@ -448,20 +424,16 @@ static int evaluate_threshold(
 }
 
 int main(void) {
-    const char *names[] = {
-        "temperature-like", "wind-like", "irregular"
-    };
+    const char* names[] = {"temperature-like", "wind-like", "irregular"};
 
     const double selectivities[] = {
-        0.0001,  /* 0.01% */
-        0.001,   /* 0.1%  */
-        0.01,    /* 1%    */
-        0.10,    /* 10%   */
-        0.50,    /* 50%   */
+        0.0001, /* 0.01% */
+        0.001,  /* 0.1%  */
+        0.01,   /* 1%    */
+        0.10,   /* 10%   */
+        0.50,   /* 50%   */
         0.90    /* 90%   */
     };
-
-
 
     for (int sample = 0; sample < 3; ++sample) {
         if (!prepare_sample(sample))
@@ -469,9 +441,7 @@ int main(void) {
 
         printf("\n=== %s ===\n", names[sample]);
 
-        for (size_t i = 0;
-             i < sizeof(selectivities) / sizeof(selectivities[0]);
-             ++i) {
+        for (size_t i = 0; i < sizeof(selectivities) / sizeof(selectivities[0]); ++i) {
             if (!evaluate_threshold(selectivities[i])) {
                 fprintf(stderr, "FAIL: oracle evaluation\n");
                 return 1;
