@@ -131,7 +131,7 @@ static SzResult decode_chunk(
     zfp_stream_set_rate(zfp, rate, zfp_type_float, 3, 0);
     zfp_stream_rewind(zfp);
 
-    field = zfp_field_3d(out, zfp_type_float, nx, ny, nz);
+    field = zfp_field_3d(out, zfp_type_float, nz, ny, nx);
     if (field == NULL) {
         zfp_stream_close(zfp);
         stream_close(stream);
@@ -214,11 +214,13 @@ SzResult szfp_pack_chunk(
     bitstream* stream;
     zfp_stream* zfp;
     zfp_field* field;
+    float* dec;
     float* block_mins;
     float* block_maxs;
     float cmin;
     float cmax;
     float eps;
+    double max_err;
     unsigned char* meta;
     unsigned char* offs;
     size_t ret;
@@ -251,7 +253,7 @@ SzResult szfp_pack_chunk(
     zfp_stream_set_rate(zfp, rate, zfp_type_float, 3, 0);
     zfp_stream_rewind(zfp);
 
-    field = zfp_field_3d((void*)chunk, zfp_type_float, nx, ny, nz);
+    field = zfp_field_3d((void*)chunk, zfp_type_float, nz, ny, nx);
     if (field == NULL) {
         zfp_stream_close(zfp);
         stream_close(stream);
@@ -282,56 +284,80 @@ SzResult szfp_pack_chunk(
         return SZ_ERR_SIZE;
     }
 
+    dec = (float*)malloc(lt.nval * sizeof(float));
     block_mins = (float*)malloc(minmax_bytes);
     block_maxs = (float*)malloc(minmax_bytes);
 
-    if (block_mins == NULL || block_maxs == NULL) {
+    if (dec == NULL || block_mins == NULL || block_maxs == NULL) {
+        free(dec);
         free(block_mins);
         free(block_maxs);
         return SZ_ERR_MALLOC;
     }
 
-    cmin = FLT_MAX;
-    cmax = -FLT_MAX;
-    eps = 0.0f;
-
-    for (size_t block_id = 0; block_id < lt.nblk; block_id++) {
-        float block[64];
-        float bmin = FLT_MAX;
-        float bmax = -FLT_MAX;
-
-        SzResult code = szfp_decompress_block(
-            out + block_id * block_nbytes, block_nbytes, rate, zfp_type_float, 3, block
-        );
-
+    {
+        SzResult code = decode_chunk(out, lt.data_size, nx, ny, nz, rate, dec);
         if (code != SZ_OK) {
+            free(dec);
             free(block_mins);
             free(block_maxs);
             return code;
         }
+    }
 
-        for (size_t i = 0; i < 64; i++) {
-            float v = block[i];
+    cmin = FLT_MAX;
+    cmax = -FLT_MAX;
+    max_err = 0.0;
 
-            if (v < bmin) {
-                bmin = v;
+    for (size_t bx = 0; bx < lt.bx; bx++) {
+        for (size_t by = 0; by < lt.by; by++) {
+            for (size_t bz = 0; bz < lt.bz; bz++) {
+                size_t block_id = (bx * lt.by + by) * lt.bz + bz;
+                float bmin = FLT_MAX;
+                float bmax = -FLT_MAX;
+
+                for (size_t dx = 0; dx < 4; dx++) {
+                    for (size_t dy = 0; dy < 4; dy++) {
+                        for (size_t dz = 0; dz < 4; dz++) {
+                            size_t idx =
+                                get_index3(4 * bx + dx, 4 * by + dy, 4 * bz + dz, ny, nz);
+                            float v = chunk[idx];
+                            double err = fabs((double)v - (double)dec[idx]);
+
+                            if (v < bmin) {
+                                bmin = v;
+                            }
+
+                            if (v > bmax) {
+                                bmax = v;
+                            }
+
+                            if (err > max_err) {
+                                max_err = err;
+                            }
+                        }
+                    }
+                }
+
+                block_mins[block_id] = bmin;
+                block_maxs[block_id] = bmax;
+
+                if (bmin < cmin) {
+                    cmin = bmin;
+                }
+
+                if (bmax > cmax) {
+                    cmax = bmax;
+                }
             }
-
-            if (v > bmax) {
-                bmax = v;
-            }
         }
+    }
 
-        block_mins[block_id] = bmin;
-        block_maxs[block_id] = bmax;
+    free(dec);
 
-        if (bmin < cmin) {
-            cmin = bmin;
-        }
-
-        if (bmax > cmax) {
-            cmax = bmax;
-        }
+    eps = (float)max_err;
+    if ((double)eps < max_err) {
+        eps = nextafterf(eps, FLT_MAX);
     }
 
     meta = out + lt.data_size;
@@ -358,6 +384,7 @@ SzResult szfp_pack_chunk(
             offs[block_id * 2u + 1u] = to_u8(max_off);
         }
     }
+
     free(block_mins);
     free(block_maxs);
     *out_size = lt.pack_size;

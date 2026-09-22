@@ -42,7 +42,7 @@ class _Native:
             ctypes.c_size_t,
             ctypes.c_size_t,
             ctypes.c_size_t,
-            ctypes.c_float,
+            ctypes.c_double,
             ctypes.c_int,
             ctypes.POINTER(ctypes.c_uint32),
             ctypes.POINTER(ctypes.c_uint32),
@@ -59,7 +59,7 @@ class _Native:
             ctypes.c_size_t,
             ctypes.c_double,
             ctypes.c_int,
-            ctypes.c_float,
+            ctypes.c_double,
             ctypes.c_int,
             ctypes.POINTER(ctypes.c_size_t),
         ]

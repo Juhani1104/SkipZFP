@@ -172,7 +172,7 @@ SzResult szfp_unpack_chunk(
     zfp_stream_set_rate(zfp, rate, zfp_type_float, 3, 0);
     zfp_stream_rewind(zfp);
 
-    field = zfp_field_3d(out, zfp_type_float, nx, ny, nz);
+    field = zfp_field_3d(out, zfp_type_float, nz, ny, nx);
     if (field == NULL) {
         zfp_stream_close(zfp);
         stream_close(stream);

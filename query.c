@@ -1,5 +1,6 @@
 #include <zfp.h>
 
+#include <float.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -119,7 +120,7 @@ int szfp_plan_gt(
     size_t n_chunk,
     size_t meta_size,
     size_t blocks_per_chunk,
-    float threshold,
+    double threshold,
     int threads,
     uint32_t* maybe_chunks,
     uint32_t* maybe_blocks,
@@ -179,14 +180,14 @@ int szfp_plan_gt(
         float cmax;
         float eps;
         double span;
-        double delta;
+        double slack;
 
         memcpy(&cmin, cm, sizeof(float));
         memcpy(&cmax, cm + sizeof(float), sizeof(float));
         memcpy(&eps, cm + 2u * sizeof(float), sizeof(float));
 
         span = (double)cmax - (double)cmin;
-        delta = span == 0.0 ? 0.0 : span / 255.0;
+        slack = 8.0 * DBL_EPSILON * (fabs((double)cmin) + fabs((double)cmax));
 
         for (size_t bid = 0; bid < blocks_per_chunk; bid++) {
             double bmin;
@@ -197,15 +198,15 @@ int szfp_plan_gt(
                 bmin = cmin;
                 bmax = cmax;
             } else {
-                bmin = (double)cmin + ((double)offs[bid * 2u] / 255.0) * span - delta;
+                bmin = (double)cmin + ((double)offs[bid * 2u] / 255.0) * span - slack;
 
                 bmax =
-                    (double)cmin + ((double)offs[bid * 2u + 1u] / 255.0) * span + delta;
+                    (double)cmin + ((double)offs[bid * 2u + 1u] / 255.0) * span + slack;
             }
 
-            if (bmin - (double)eps > (double)threshold) {
+            if (bmin - (double)eps > threshold) {
                 state = 1;
-            } else if (bmax + (double)eps <= (double)threshold) {
+            } else if (bmax + (double)eps <= threshold) {
                 state = 0;
             }
 
@@ -245,7 +246,7 @@ int szfp_count_gt_blocks(
     size_t block_nbytes,
     double rate,
     int block_dim,
-    float threshold,
+    double threshold,
     int threads,
     size_t* out_count
 ) {
@@ -334,7 +335,7 @@ int szfp_count_gt_blocks(
         local_count = 0;
 
         for (size_t i = 0; i < nval; i++) {
-            local_count += vals[i] > threshold;
+            local_count += (double)vals[i] > threshold;
         }
 
         count += local_count;
@@ -348,4 +349,53 @@ int szfp_count_gt_blocks(
 
     *out_count = count;
     return SZFP_OK;
+}
+int szfp_decode_blocks(
+    const unsigned char* blocks,
+    size_t block_count,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    int threads,
+    float* out
+) {
+    size_t nval;
+    size_t need_bytes;
+    int failed;
+    int workers;
+
+    if (block_count == 0) {
+        return SZFP_OK;
+    }
+
+    if (blocks == NULL || out == NULL) {
+        return SZFP_ERR_NULL;
+    }
+
+    if (!block_layout(block_dim, rate, &nval, &need_bytes)) {
+        return SZFP_ERR_ARG;
+    }
+
+    if (block_nbytes != need_bytes) {
+        return SZFP_ERR_SIZE;
+    }
+
+    workers = threads > 0 ? threads : 1;
+    failed = 0;
+
+#ifdef _OPENMP
+    if (threads <= 0) {
+        workers = omp_get_max_threads();
+    }
+#pragma omp parallel for reduction(| : failed) schedule(static) num_threads(workers)
+#endif
+    for (size_t bid = 0; bid < block_count; bid++) {
+        if (decode_block(
+                blocks + bid * block_nbytes, block_nbytes, rate, block_dim, out + bid * nval
+            ) != SZFP_OK) {
+            failed = 1;
+        }
+    }
+
+    return failed ? SZFP_ERR_ZFP : SZFP_OK;
 }

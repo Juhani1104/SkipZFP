@@ -9,7 +9,7 @@ int szfp_plan_gt(
     size_t n_chunk,
     size_t meta_size,
     size_t blocks_per_chunk,
-    float threshold,
+    double threshold,
     int threads,
     uint32_t* maybe_chunks,
     uint32_t* maybe_blocks,
@@ -25,9 +25,19 @@ int szfp_count_gt_blocks(
     size_t block_nbytes,
     double rate,
     int block_dim,
-    float threshold,
+    double threshold,
     int threads,
     size_t* out_count
+);
+
+int szfp_decode_blocks(
+    const unsigned char* blocks,
+    size_t block_count,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    int threads,
+    float* out
 );
 
 #endif

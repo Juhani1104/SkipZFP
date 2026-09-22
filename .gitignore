@@ -1,6 +1,5 @@
 .clang-format
 .vscode/
-pyproject.toml
 core.so
 .venv/
 __pycache__/
