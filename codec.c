@@ -39,8 +39,7 @@ static int calc_size(
     double rate,
     int block_dim,
     size_t* data_size,
-    size_t* meta_size,
-    size_t* pack_size
+    size_t* meta_size
 ) {
     size_t nxy;
     size_t nval;
@@ -52,7 +51,7 @@ static int calc_size(
     size_t off_size;
     size_t hdr_size;
 
-    if (data_size == NULL || meta_size == NULL || pack_size == NULL) {
+    if (data_size == NULL || meta_size == NULL) {
         return 0;
     }
 
@@ -85,41 +84,16 @@ static int calc_size(
     *data_size = (size_t)((double)nval * rate / 8.0);
     hdr_size = 3u * sizeof(float);
 
-    if (*data_size == 0 || !add_size(hdr_size, off_size, meta_size) ||
-        !add_size(*data_size, *meta_size, pack_size)) {
+    if (*data_size == 0 || !add_size(hdr_size, off_size, meta_size)) {
         return 0;
     }
 
     return 1;
 }
 
-SzResult szfp_packed_size(
-    size_t nx,
-    size_t ny,
-    size_t nz,
-    double rate,
-    int block_dim,
-    size_t* out_size
-) {
-    size_t data_size;
-    size_t meta_size;
-    size_t pack_size;
-
-    if (out_size == NULL) {
-        return SZ_ERR_NULL;
-    }
-
-    if (!calc_size(nx, ny, nz, rate, block_dim, &data_size, &meta_size, &pack_size)) {
-        return SZ_ERR_ARG;
-    }
-
-    *out_size = pack_size;
-    return SZ_OK;
-}
-
-SzResult szfp_unpack_chunk(
-    const unsigned char* packed,
-    size_t packed_size,
+SzResult szfp_decode(
+    const unsigned char* src,
+    size_t src_size,
     size_t nx,
     size_t ny,
     size_t nz,
@@ -132,13 +106,12 @@ SzResult szfp_unpack_chunk(
     size_t nval;
     size_t data_size;
     size_t meta_size;
-    size_t pack_size;
     bitstream* stream;
     zfp_stream* zfp;
     zfp_field* field;
     size_t ret;
 
-    if (packed == NULL || out == NULL) {
+    if (src == NULL || out == NULL) {
         return SZ_ERR_NULL;
     }
 
@@ -150,15 +123,15 @@ SzResult szfp_unpack_chunk(
         return SZ_ERR_SIZE;
     }
 
-    if (!calc_size(nx, ny, nz, rate, block_dim, &data_size, &meta_size, &pack_size)) {
+    if (!calc_size(nx, ny, nz, rate, block_dim, &data_size, &meta_size)) {
         return SZ_ERR_ARG;
     }
 
-    if (packed_size != pack_size) {
+    if (src_size != data_size) {
         return SZ_ERR_SIZE;
     }
 
-    stream = stream_open((void*)packed, data_size);
+    stream = stream_open((void*)src, data_size);
     if (stream == NULL) {
         return SZ_ERR_STREAM;
     }
@@ -188,21 +161,20 @@ SzResult szfp_unpack_chunk(
     return ret == 0 ? SZ_ERR_DECOMPRESS : SZ_OK;
 }
 
-SzResult szfp_layout_size(
+SzResult szfp_layout(
     size_t nx,
     size_t ny,
     size_t nz,
     double rate,
     int block_dim,
     size_t* data_size,
-    size_t* meta_size,
-    size_t* pack_size
+    size_t* meta_size
 ) {
-    if (data_size == NULL || meta_size == NULL || pack_size == NULL) {
+    if (data_size == NULL || meta_size == NULL) {
         return SZ_ERR_NULL;
     }
 
-    if (!calc_size(nx, ny, nz, rate, block_dim, data_size, meta_size, pack_size)) {
+    if (!calc_size(nx, ny, nz, rate, block_dim, data_size, meta_size)) {
         return SZ_ERR_ARG;
     }
 

@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 import zarr
+from codec import META_ATTR
 from zarr.abc.store import RangeByteRequest
 from zarr.core.buffer import default_buffer_prototype
 from zarr.core.sync import sync
@@ -25,7 +26,7 @@ class _Native:
 
         self.lib = ctypes.CDLL(str(path))
 
-        self.lib.szfp_layout_size.argtypes = [
+        self.lib.szfp_layout.argtypes = [
             ctypes.c_size_t,
             ctypes.c_size_t,
             ctypes.c_size_t,
@@ -33,9 +34,8 @@ class _Native:
             ctypes.c_int,
             ctypes.POINTER(ctypes.c_size_t),
             ctypes.POINTER(ctypes.c_size_t),
-            ctypes.POINTER(ctypes.c_size_t),
         ]
-        self.lib.szfp_layout_size.restype = ctypes.c_int
+        self.lib.szfp_layout.restype = ctypes.c_int
 
         self.lib.szfp_plan_gt.argtypes = [
             ctypes.POINTER(ctypes.c_ubyte),
@@ -75,12 +75,11 @@ class _Native:
         shape: tuple[int, int, int],
         rate: float,
         block_dim: int,
-    ) -> tuple[int, int, int]:
+    ) -> tuple[int, int]:
         data_size = ctypes.c_size_t()
         meta_size = ctypes.c_size_t()
-        pack_size = ctypes.c_size_t()
 
-        code = self.lib.szfp_layout_size(
+        code = self.lib.szfp_layout(
             shape[0],
             shape[1],
             shape[2],
@@ -88,15 +87,10 @@ class _Native:
             block_dim,
             ctypes.byref(data_size),
             ctypes.byref(meta_size),
-            ctypes.byref(pack_size),
         )
-        self.check(code, "szfp_layout_size")
+        self.check(code, "szfp_layout")
 
-        return (
-            int(data_size.value),
-            int(meta_size.value),
-            int(pack_size.value),
-        )
+        return int(data_size.value), int(meta_size.value)
 
     def plan(
         self,
@@ -218,7 +212,6 @@ class _Layout:
     block_dim: int
     data_size: int
     meta_size: int
-    pack_size: int
     block_size: int
     blocks_per_chunk: int
     values_per_block: int
@@ -327,7 +320,7 @@ def get_layout(arr: zarr.Array) -> _Layout:
     blocks_per_chunk = int(np.prod(blocks_axis))
     values_per_block = block_dim**3
 
-    data_size, meta_size, pack_size = native().layout(
+    data_size, meta_size = native().layout(
         chunk_shape,
         rate,
         block_dim,
@@ -335,7 +328,7 @@ def get_layout(arr: zarr.Array) -> _Layout:
 
     if blocks_per_chunk <= 0:
         raise ValueError("invalid block layout")
-    if data_size <= 0 or meta_size <= 0 or pack_size <= 0:
+    if data_size <= 0 or meta_size <= 0:
         raise ValueError("invalid fixed-rate layout")
     if data_size % blocks_per_chunk != 0:
         raise ValueError("compressed payload is not divisible by blocks")
@@ -349,7 +342,6 @@ def get_layout(arr: zarr.Array) -> _Layout:
         block_dim=block_dim,
         data_size=data_size,
         meta_size=meta_size,
-        pack_size=pack_size,
         block_size=block_size,
         blocks_per_chunk=blocks_per_chunk,
         values_per_block=values_per_block,
@@ -421,6 +413,25 @@ async def read_ranges(
         out.extend(parts)
 
     return out
+
+
+async def read_meta(arr: zarr.Array, lt: _Layout) -> tuple[np.ndarray, int, int]:
+    path = arr.attrs.get(META_ATTR)
+    if not path:
+        raise ValueError("array has no metadata; run codec.write_meta first")
+
+    meta = await zarr.api.asynchronous.open_array(
+        store=arr.store_path.store,
+        path=path,
+        mode="r",
+    )
+
+    if tuple(meta.shape) != (*lt.grid_shape, lt.meta_size):
+        raise ValueError(f"metadata shape {meta.shape} does not match the array layout")
+
+    data = np.ascontiguousarray(await meta.getitem(...), dtype=np.uint8).reshape(-1)
+    n_obj = int(np.prod([ceildiv(s, c) for s, c in zip(meta.shape, meta.chunks)]))
+    return data, data.nbytes, n_obj
 
 
 def merge_ranges(
@@ -538,25 +549,9 @@ async def query_gt_async(
     keys = [full_key(arr, arr.metadata.encode_chunk_key(coord)) for coord in coords]
     store = arr.store_path.store
 
-    meta_reqs = [
-        _Range(
-            key=key,
-            start=lt.data_size,
-            end=lt.data_size + lt.meta_size,
-        )
-        for key in keys
-    ]
-
     t1 = time.perf_counter()
-    meta_parts = await read_ranges(
-        store,
-        meta_reqs,
-        concurrency=request_concurrency,
-        batch_size=request_batch_size,
-    )
+    meta, meta_bytes, meta_requests = await read_meta(arr, lt)
     meta_read_sec = time.perf_counter() - t1
-
-    meta = np.frombuffer(b"".join(meta_parts), dtype=np.uint8).copy()
 
     t1 = time.perf_counter()
     chunk_ids, block_ids, n_in, n_out = await asyncio.to_thread(
@@ -618,7 +613,6 @@ async def query_gt_async(
 
     total_blocks = len(keys) * lt.blocks_per_chunk
     total_count = n_in * lt.values_per_block + n_maybe_val
-    meta_bytes = sum(len(x) for x in meta_parts)
     payload_bytes = sum(len(x) for x in payload_parts)
     useful_bytes = len(sorted_blocks) * lt.block_size
 
@@ -630,7 +624,7 @@ async def query_gt_async(
         total_blocks=total_blocks,
         metadata_bytes_read=meta_bytes,
         payload_bytes_read=payload_bytes,
-        metadata_requests=len(meta_reqs),
+        metadata_requests=meta_requests,
         payload_requests=len(payload_reqs),
         useful_payload_bytes=useful_bytes,
         payload_overread_bytes=payload_bytes - useful_bytes,

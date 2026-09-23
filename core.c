@@ -18,7 +18,6 @@ typedef struct {
     size_t nblk;
     size_t data_size;
     size_t meta_size;
-    size_t pack_size;
 } SzfpLayout;
 
 static int mul_size(size_t a, size_t b, size_t* out) {
@@ -95,8 +94,7 @@ static int calc_layout(
     lt->data_size = (size_t)((double)lt->nval * rate / 8.0);
     hdr_size = 3u * sizeof(float);
 
-    if (lt->data_size == 0 || !add_size(hdr_size, off_size, &lt->meta_size) ||
-        !add_size(lt->data_size, lt->meta_size, &lt->pack_size)) {
+    if (lt->data_size == 0 || !add_size(hdr_size, off_size, &lt->meta_size)) {
         return 0;
     }
 
@@ -147,7 +145,7 @@ static SzResult decode_chunk(
     return ret == 0 ? SZ_ERR_DECOMPRESS : SZ_OK;
 }
 
-SzResult szfp_decompress_block(
+SzResult szfp_decode_block(
     const unsigned char* block_bytes,
     size_t block_nbytes,
     double rate,
@@ -199,47 +197,21 @@ SzResult szfp_decompress_block(
     return ret == 0 ? SZ_ERR_DECOMPRESS : SZ_OK;
 }
 
-SzResult szfp_pack_chunk(
+static SzResult compress_chunk(
     const float* chunk,
     size_t nx,
     size_t ny,
     size_t nz,
     double rate,
-    int block_dim,
     unsigned char* out,
-    size_t out_capacity,
-    size_t* out_size
+    size_t out_size
 ) {
-    SzfpLayout lt;
     bitstream* stream;
     zfp_stream* zfp;
     zfp_field* field;
-    float* dec;
-    float* block_mins;
-    float* block_maxs;
-    float cmin;
-    float cmax;
-    float eps;
-    double max_err;
-    unsigned char* meta;
-    unsigned char* offs;
     size_t ret;
-    size_t block_nbytes;
-    size_t minmax_bytes;
 
-    if (chunk == NULL || out == NULL || out_size == NULL) {
-        return SZ_ERR_NULL;
-    }
-
-    if (!calc_layout(nx, ny, nz, rate, block_dim, &lt)) {
-        return SZ_ERR_ARG;
-    }
-
-    if (out_capacity < lt.pack_size) {
-        return SZ_ERR_SIZE;
-    }
-
-    stream = stream_open(out, lt.data_size);
+    stream = stream_open(out, out_size);
     if (stream == NULL) {
         return SZ_ERR_STREAM;
     }
@@ -266,43 +238,113 @@ SzResult szfp_pack_chunk(
     zfp_stream_close(zfp);
     stream_close(stream);
 
-    if (ret == 0) {
-        return SZ_ERR_COMPRESS;
+    return ret == 0 ? SZ_ERR_COMPRESS : SZ_OK;
+}
+
+SzResult szfp_encode(
+    const float* chunk,
+    size_t nx,
+    size_t ny,
+    size_t nz,
+    double rate,
+    int block_dim,
+    unsigned char* out,
+    size_t out_capacity,
+    size_t* out_size
+) {
+    SzfpLayout lt;
+    SzResult code;
+
+    if (chunk == NULL || out == NULL || out_size == NULL) {
+        return SZ_ERR_NULL;
     }
 
-    if (lt.nblk == 0 || lt.data_size % lt.nblk != 0) {
+    if (!calc_layout(nx, ny, nz, rate, block_dim, &lt)) {
+        return SZ_ERR_ARG;
+    }
+
+    if (out_capacity < lt.data_size) {
         return SZ_ERR_SIZE;
     }
 
-    block_nbytes = lt.data_size / lt.nblk;
-
-    if (block_nbytes == 0 || (double)block_nbytes != 64.0 * rate / 8.0) {
+    if (lt.data_size % lt.nblk != 0 ||
+        (double)(lt.data_size / lt.nblk) != 64.0 * rate / 8.0) {
         return SZ_ERR_ARG;
+    }
+
+    code = compress_chunk(chunk, nx, ny, nz, rate, out, lt.data_size);
+    if (code != SZ_OK) {
+        return code;
+    }
+
+    *out_size = lt.data_size;
+    return SZ_OK;
+}
+
+SzResult szfp_meta(
+    const float* chunk,
+    size_t nx,
+    size_t ny,
+    size_t nz,
+    double rate,
+    int block_dim,
+    unsigned char* meta,
+    size_t meta_capacity
+) {
+    SzfpLayout lt;
+    SzResult code;
+    unsigned char* data;
+    float* dec;
+    float* block_mins;
+    float* block_maxs;
+    float cmin;
+    float cmax;
+    float eps;
+    double max_err;
+    unsigned char* offs;
+    size_t minmax_bytes;
+
+    if (chunk == NULL || meta == NULL) {
+        return SZ_ERR_NULL;
+    }
+
+    if (!calc_layout(nx, ny, nz, rate, block_dim, &lt)) {
+        return SZ_ERR_ARG;
+    }
+
+    if (meta_capacity < lt.meta_size) {
+        return SZ_ERR_SIZE;
     }
 
     if (!mul_size(lt.nblk, sizeof(float), &minmax_bytes)) {
         return SZ_ERR_SIZE;
     }
 
+    data = (unsigned char*)malloc(lt.data_size);
     dec = (float*)malloc(lt.nval * sizeof(float));
     block_mins = (float*)malloc(minmax_bytes);
     block_maxs = (float*)malloc(minmax_bytes);
 
-    if (dec == NULL || block_mins == NULL || block_maxs == NULL) {
+    if (data == NULL || dec == NULL || block_mins == NULL || block_maxs == NULL) {
+        free(data);
         free(dec);
         free(block_mins);
         free(block_maxs);
         return SZ_ERR_MALLOC;
     }
 
-    {
-        SzResult code = decode_chunk(out, lt.data_size, nx, ny, nz, rate, dec);
-        if (code != SZ_OK) {
-            free(dec);
-            free(block_mins);
-            free(block_maxs);
-            return code;
-        }
+    code = compress_chunk(chunk, nx, ny, nz, rate, data, lt.data_size);
+    if (code == SZ_OK) {
+        code = decode_chunk(data, lt.data_size, nx, ny, nz, rate, dec);
+    }
+
+    free(data);
+
+    if (code != SZ_OK) {
+        free(dec);
+        free(block_mins);
+        free(block_maxs);
+        return code;
     }
 
     cmin = FLT_MAX;
@@ -360,7 +402,6 @@ SzResult szfp_pack_chunk(
         eps = nextafterf(eps, FLT_MAX);
     }
 
-    meta = out + lt.data_size;
     memcpy(meta, &cmin, sizeof(float));
     memcpy(meta + sizeof(float), &cmax, sizeof(float));
     memcpy(meta + 2u * sizeof(float), &eps, sizeof(float));
@@ -387,6 +428,5 @@ SzResult szfp_pack_chunk(
 
     free(block_mins);
     free(block_maxs);
-    *out_size = lt.pack_size;
     return SZ_OK;
 }

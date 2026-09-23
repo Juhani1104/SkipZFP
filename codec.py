@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
 import numpy as np
+import zarr
 from zarr.abc.codec import ArrayBytesCodec
 from zarr.core.array_spec import ArraySpec
 from zarr.core.buffer import Buffer, NDBuffer
@@ -35,17 +37,18 @@ class _Native:
 
         self.lib = ctypes.CDLL(str(path))
 
-        self.lib.szfp_packed_size.argtypes = [
+        self.lib.szfp_layout.argtypes = [
             ctypes.c_size_t,
             ctypes.c_size_t,
             ctypes.c_size_t,
             ctypes.c_double,
             ctypes.c_int,
             ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
         ]
-        self.lib.szfp_packed_size.restype = ctypes.c_int
+        self.lib.szfp_layout.restype = ctypes.c_int
 
-        self.lib.szfp_pack_chunk.argtypes = [
+        self.lib.szfp_encode.argtypes = [
             ctypes.POINTER(ctypes.c_float),
             ctypes.c_size_t,
             ctypes.c_size_t,
@@ -56,9 +59,9 @@ class _Native:
             ctypes.c_size_t,
             ctypes.POINTER(ctypes.c_size_t),
         ]
-        self.lib.szfp_pack_chunk.restype = ctypes.c_int
+        self.lib.szfp_encode.restype = ctypes.c_int
 
-        self.lib.szfp_unpack_chunk.argtypes = [
+        self.lib.szfp_decode.argtypes = [
             ctypes.POINTER(ctypes.c_ubyte),
             ctypes.c_size_t,
             ctypes.c_size_t,
@@ -69,7 +72,19 @@ class _Native:
             ctypes.POINTER(ctypes.c_float),
             ctypes.c_size_t,
         ]
-        self.lib.szfp_unpack_chunk.restype = ctypes.c_int
+        self.lib.szfp_decode.restype = ctypes.c_int
+
+        self.lib.szfp_meta.argtypes = [
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_double,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.c_size_t,
+        ]
+        self.lib.szfp_meta.restype = ctypes.c_int
 
     @staticmethod
     def check(code: int, name: str) -> None:
@@ -77,24 +92,26 @@ class _Native:
             msg = _ERR.get(code, f"unknown error {code}")
             raise RuntimeError(f"{name} failed: {msg}")
 
-    def size(
+    def layout(
         self,
         shape: tuple[int, int, int],
         rate: float,
         block_dim: int,
-    ) -> int:
-        out = ctypes.c_size_t()
+    ) -> tuple[int, int]:
+        data_size = ctypes.c_size_t()
+        meta_size = ctypes.c_size_t()
 
-        code = self.lib.szfp_packed_size(
+        code = self.lib.szfp_layout(
             shape[0],
             shape[1],
             shape[2],
             rate,
             block_dim,
-            ctypes.byref(out),
+            ctypes.byref(data_size),
+            ctypes.byref(meta_size),
         )
-        self.check(code, "szfp_packed_size")
-        return int(out.value)
+        self.check(code, "szfp_layout")
+        return int(data_size.value), int(meta_size.value)
 
     def encode(
         self,
@@ -108,11 +125,11 @@ class _Native:
         if len(shape) != 3:
             raise ValueError("SkipZFP currently only supports 3D chunks")
 
-        cap = self.size(shape, rate, block_dim)
+        cap, _ = self.layout(shape, rate, block_dim)
         out = np.empty(cap, dtype=np.uint8)
         n = ctypes.c_size_t()
 
-        code = self.lib.szfp_pack_chunk(
+        code = self.lib.szfp_encode(
             src.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
             shape[0],
             shape[1],
@@ -123,11 +140,11 @@ class _Native:
             out.size,
             ctypes.byref(n),
         )
-        self.check(code, "szfp_pack_chunk")
+        self.check(code, "szfp_encode")
 
         if int(n.value) != cap:
             raise RuntimeError(
-                "szfp_pack_chunk returned unexpected size: "
+                "szfp_encode returned unexpected size: "
                 f"actual={int(n.value)}, expected={cap}"
             )
 
@@ -143,7 +160,7 @@ class _Native:
         src = np.ascontiguousarray(buf, dtype=np.uint8).reshape(-1)
         out = np.empty(shape, dtype=np.float32)
 
-        code = self.lib.szfp_unpack_chunk(
+        code = self.lib.szfp_decode(
             src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             src.size,
             shape[0],
@@ -154,7 +171,32 @@ class _Native:
             out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
             out.size,
         )
-        self.check(code, "szfp_unpack_chunk")
+        self.check(code, "szfp_decode")
+
+        return out
+
+    def meta(
+        self,
+        arr: np.ndarray,
+        rate: float,
+        block_dim: int,
+    ) -> np.ndarray:
+        src = np.ascontiguousarray(arr, dtype=np.float32)
+        shape = tuple(int(x) for x in src.shape)
+        _, meta_size = self.layout(shape, rate, block_dim)
+        out = np.empty(meta_size, dtype=np.uint8)
+
+        code = self.lib.szfp_meta(
+            src.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            shape[0],
+            shape[1],
+            shape[2],
+            rate,
+            block_dim,
+            out.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
+            out.size,
+        )
+        self.check(code, "szfp_meta")
 
         return out
 
@@ -247,7 +289,7 @@ class SkipZFPCodec(ArrayBytesCodec):
         del input_byte_length
 
         shape = self.chunk_shape(chunk_spec)
-        return native().size(shape, self.rate, self.block_dim)
+        return native().layout(shape, self.rate, self.block_dim)[0]
 
     async def _encode_single(
         self,
@@ -287,3 +329,59 @@ class SkipZFPCodec(ArrayBytesCodec):
             self.block_dim,
         )
         return chunk_spec.prototype.nd_buffer.from_ndarray_like(out)
+
+
+META_ATTR = "skipzfp_meta"
+
+
+def find_codec(arr: zarr.Array) -> SkipZFPCodec:
+    for c in arr.metadata.codecs:
+        if isinstance(c, SkipZFPCodec):
+            return c
+
+    raise ValueError("array does not use the skipzfp codec")
+
+
+def write_meta(
+    arr: zarr.Array,
+    data: np.ndarray,
+    *,
+    path: str | None = None,
+    t_chunk: int = 16,
+    threads: int = 32,
+) -> zarr.Array:
+    codec = find_codec(arr)
+    chunk = tuple(int(x) for x in arr.metadata.chunk_grid.chunk_shape)
+    grid = tuple(s // c for s, c in zip(arr.shape, chunk))
+
+    if data.shape != arr.shape or any(s % c for s, c in zip(arr.shape, chunk)):
+        raise ValueError("data must match the array shape and divide into whole chunks")
+
+    if not arr.path:
+        raise ValueError("the array must live inside a group so metadata can sit next to it")
+
+    _, meta_size = native().layout(chunk, codec.rate, codec.block_dim)
+    path = path or f"{arr.path}_meta"
+
+    meta = zarr.create_array(
+        store=arr.store_path.store,
+        name=path,
+        shape=(*grid, meta_size),
+        chunks=(min(t_chunk, grid[0]), *grid[1:], meta_size),
+        dtype="uint8",
+        compressors=None,
+        filters=None,
+        overwrite=True,
+    )
+
+    def one(idx: tuple[int, ...]) -> np.ndarray:
+        sl = tuple(slice(i * c, (i + 1) * c) for i, c in zip(idx, chunk))
+        return native().meta(data[sl], codec.rate, codec.block_dim)
+
+    idxs = list(np.ndindex(*grid))
+    with ThreadPoolExecutor(threads) as ex:
+        rows = list(ex.map(one, idxs))
+
+    meta[...] = np.stack(rows).reshape(*grid, meta_size)
+    arr.update_attributes({META_ATTR: path})
+    return meta
