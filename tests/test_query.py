@@ -180,3 +180,67 @@ def test_open_skipzfp_rejects_options_for_open_array(one, kw, msg):
     z, _ = one
     with pytest.raises(ValueError, match=msg):
         query.open_skipzfp(z, **kw)
+
+
+@pytest.mark.parametrize(
+    "kw, msg",
+    [
+        (dict(request_concurrency=0), "request_concurrency"),
+        (dict(request_batch_size=0), "request_batch_size"),
+        (dict(merge_gap_blocks=-1), "merge_gap_blocks"),
+        (dict(layer=1), "layer must be in"),
+        (dict(layer=-1), "layer must be in"),
+    ],
+)
+def test_rejects_bad_query_options(one, kw, msg):
+    z, _ = one
+    with pytest.raises(ValueError, match=msg):
+        query.query_gt(z, 285.0, **kw)
+
+
+def test_async_entry_requires_open_array():
+    with pytest.raises(TypeError, match="opened zarr.Array"):
+        zarr.core.sync.sync(query.query_gt_async("not-an-array", 0.0))
+
+
+def test_rejects_metadata_of_wrong_shape(tmp_path):
+    a = smooth_field(shape=(128, 32, 64), seed=10)
+    z = make_array(tmp_path / "a", a, rate=8.0)
+    g = zarr.open_group(str(tmp_path / "a"), mode="a")
+    g.create_array("wrong_meta", data=np.zeros((1, 1, 1, 4), np.uint8))
+    z.update_attributes({codec.META_ATTR: "wrong_meta"})
+    with pytest.raises(ValueError, match="does not match the array layout"):
+        query.query_gt(z, 285.0)
+
+
+def _damaged(tmp_path, damage):
+    a = smooth_field(shape=(128, 32, 64), seed=11)
+    z = make_array(tmp_path / "a", a, rate=8.0)
+    chunk = tmp_path / "a" / "data" / "c" / "1" / "1" / "1"
+    damage(chunk)
+    return z, float(np.median(a))
+
+
+def test_missing_chunk_is_reported(tmp_path):
+    z, th = _damaged(tmp_path, lambda f: f.unlink())
+    with pytest.raises(FileNotFoundError):
+        query.query_gt(z, th)
+
+
+def test_truncated_chunk_is_reported(tmp_path):
+    z, th = _damaged(tmp_path, lambda f: f.write_bytes(f.read_bytes()[:100]))
+    with pytest.raises(OSError, match="short range read"):
+        query.query_gt(z, th)
+
+
+def test_merge_ranges_sorts_its_input():
+    rng = np.random.default_rng(0)
+    chunks = rng.integers(0, 3, 200).astype(np.uint32)
+    blocks = rng.integers(0, 512, 200).astype(np.uint32)
+    key = np.unique((chunks.astype(np.uint64) << np.uint64(32)) | blocks)
+    sc, sb = (key >> np.uint64(32)).astype(np.uint32), key.astype(np.uint32)
+    keys = ["a", "b", "c"]
+    perm = rng.permutation(len(sc))
+    got, got_blocks = query.merge_ranges(keys, sc[perm], sb[perm], 64, 4)
+    want, want_blocks = query.merge_ranges(keys, sc, sb, 64, 4)
+    assert got == want and np.array_equal(got_blocks, want_blocks)

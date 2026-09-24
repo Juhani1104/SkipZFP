@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 import zarr
 from helpers import SHAPE, make_array, smooth_field
+from zarr.core.array_spec import ArrayConfig, ArraySpec
+from zarr.core.buffer import default_buffer_prototype
 
 from skipzfp import SkipZFPCodec
 
@@ -106,3 +108,27 @@ def test_rejects_non_finite_values(tmp_path, bad):
     a[3, 4, 5] = bad
     with pytest.raises(ValueError, match="NaN or infinite"):
         z[:] = a
+
+
+def test_from_dict_rejects_wrong_name():
+    with pytest.raises(ValueError, match="wrong codec name"):
+        SkipZFPCodec.from_dict({"name": "zfpy", "configuration": {}})
+
+
+def test_from_dict_rejects_non_object_configuration():
+    with pytest.raises(TypeError, match="JSON object"):
+        SkipZFPCodec.from_dict({"name": "skipzfp", "configuration": [8.0]})
+
+
+@pytest.mark.parametrize("kw", CONFIGS)
+def test_encoded_size_matches_stored_chunk(tmp_path, kw):
+    z = make_array(tmp_path / "a", smooth_field(), **kw)
+    spec = ArraySpec(
+        shape=z.chunks,
+        dtype=z.metadata.data_type,
+        fill_value=z.metadata.fill_value,
+        config=ArrayConfig.from_dict({}),
+        prototype=default_buffer_prototype(),
+    )
+    size = SkipZFPCodec(**kw).compute_encoded_size(0, spec)
+    assert size == (tmp_path / "a" / "data" / "c" / "0" / "0" / "0").stat().st_size
