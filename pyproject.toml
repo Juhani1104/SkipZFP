@@ -5,8 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skipzfp"
 version = "0.1.0"
+license = "BSD-3-Clause"
 requires-python = ">=3.11"
-dependencies = ["numpy", "zarr>=3"]
+dependencies = ["numpy>=2", "zarr>=3.4"]
+
+[project.optional-dependencies]
+test = ["pytest", "zfpy"]
+experiments = ["zfpy", "numcodecs", "obstore", "scipy", "gstools", "matplotlib"]
 
 [tool.setuptools]
 py-modules = ["codec", "query"]

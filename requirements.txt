@@ -1,0 +1,9 @@
+numpy==2.5.3
+zarr==3.4.0
+zfpy==1.0.1
+numcodecs==0.17.0
+obstore==0.11.1
+scipy==1.18.1
+gstools==1.7.0
+matplotlib==3.11.2
+pytest==9.1.1
