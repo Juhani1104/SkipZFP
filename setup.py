@@ -6,7 +6,12 @@ from setuptools.command.build_ext import build_ext
 
 
 def zfp_prefix() -> Path:
-    candidates = [os.environ.get("ZFP_DIR"), Path.home() / ".local", "/usr/local", "/usr"]
+    candidates = [
+        os.environ.get("ZFP_DIR"),
+        Path.home() / ".local",
+        "/usr/local",
+        "/usr",
+    ]
     for c in filter(None, candidates):
         if (Path(c) / "include" / "zfp.h").exists():
             return Path(c)
@@ -14,7 +19,7 @@ def zfp_prefix() -> Path:
 
 
 class BuildShared(build_ext):
-    # the library is loaded with ctypes, so give it a fixed name instead of the Python ABI suffix
+    # loaded with ctypes, so use a fixed name instead of the Python ABI suffix
     def get_ext_filename(self, ext_name):
         return os.path.join(*ext_name.split(".")) + ".so"
 

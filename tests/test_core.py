@@ -145,7 +145,9 @@ def test_in_out_guarantees_hold_for_original_and_reconstruction(stored, q):
         coord = np.unravel_index(c, lt.grid_shape)
         sl = tuple(slice(ci * s, (ci + 1) * s) for ci, s in zip(coord, SHAPE))
         meta = codec.native().meta(a[sl], rate, 4)
-        _, _, n_in, n_out = query.native().plan(meta, 1, lt.meta_size, lt.blocks_per_chunk, th, 1)
+        _, _, n_in, n_out = query.native().plan(
+            meta, 1, lt.meta_size, lt.blocks_per_chunk, th, 1
+        )
         states = classify(meta, lt, th)
         assert (states == 1).sum() == n_in and (states == 0).sum() == n_out
         ob, rb = true_blocks(a[sl]), true_blocks(rec[sl])
@@ -191,8 +193,15 @@ ORDERS = ((0, 1, 2), (1, 2, 0), (2, 0, 1))
 
 def make_array(path, a, **kw):
     g = zarr.open_group(str(path), mode="w")
-    z = g.create_array("data", shape=a.shape, chunks=SHAPE, dtype="float32",
-                       serializer=codec.SkipZFPCodec(**kw), compressors=None, filters=None)
+    z = g.create_array(
+        "data",
+        shape=a.shape,
+        chunks=SHAPE,
+        dtype="float32",
+        serializer=codec.SkipZFPCodec(**kw),
+        compressors=None,
+        filters=None,
+    )
     z[:] = a
     codec.write_meta(z, a)
     return z
@@ -203,7 +212,10 @@ def layered(tmp_path_factory):
     a = smooth_field(shape=(128, 32, 64), seed=2)
     base = tmp_path_factory.mktemp("layered")
     ref = {r: make_array(base / f"plain{r}", a, rate=r)[:] for r in LAYERS}
-    arrs = {o: make_array(base / f"lay{o}", a, rate=8.0, layers=LAYERS, block_order=o) for o in ORDERS}
+    arrs = {
+        o: make_array(base / f"lay{o}", a, rate=8.0, layers=LAYERS, block_order=o)
+        for o in ORDERS
+    }
     return a, ref, arrs
 
 
@@ -220,7 +232,11 @@ def test_layered_meta_eps_covers_each_layer(layered, order):
     meta = zarr.open_array(store=z.store_path.store, path="data_meta", mode="r")[:]
     eps = meta[..., 8:20].copy().view(np.float32)
     for k, r in enumerate(LAYERS):
-        err = np.abs(ref[r].astype(np.float64) - a).reshape(2, 64, 2, 16, 2, 32).max(axis=(1, 3, 5))
+        err = (
+            np.abs(ref[r].astype(np.float64) - a)
+            .reshape(2, 64, 2, 16, 2, 32)
+            .max(axis=(1, 3, 5))
+        )
         assert np.all(eps[..., k] >= err)
 
 
@@ -231,12 +247,19 @@ def test_layered_meta_eps_covers_each_layer(layered, order):
 def test_layered_query_matches_plain_rate(layered, order, k, q, max_req):
     a, ref, arrs = layered
     th = float(np.quantile(a, 1 - q))
-    res = query.query_gt(arrs[order], th, layer=k, merge_gap_blocks=4, max_chunk_requests=max_req)
+    res = query.query_gt(
+        arrs[order], th, layer=k, merge_gap_blocks=4, max_chunk_requests=max_req
+    )
     assert res.count == int((ref[LAYERS[k]].astype(np.float64) > th).sum())
 
 
-SUB_CASES = [((64, 32, 64), {}), ((128, 32, 64), {}), ((128, 32, 64), dict(layers=LAYERS)),
-             ((128, 32, 64), dict(block_order=(1, 2, 0))), ((128, 32, 64), dict(layers=LAYERS, block_order=(2, 0, 1)))]
+SUB_CASES = [
+    ((64, 32, 64), {}),
+    ((128, 32, 64), {}),
+    ((128, 32, 64), dict(layers=LAYERS)),
+    ((128, 32, 64), dict(block_order=(1, 2, 0))),
+    ((128, 32, 64), dict(layers=LAYERS, block_order=(2, 0, 1))),
+]
 
 
 @pytest.fixture(scope="module")
@@ -247,9 +270,15 @@ def subbed(tmp_path_factory):
     arrs = {}
     for i, (chunk, kw) in enumerate(SUB_CASES):
         g = zarr.open_group(str(base / f"s{i}"), mode="w")
-        z = g.create_array("data", shape=a.shape, chunks=chunk, dtype="float32",
-                           serializer=codec.SkipZFPCodec(rate=8.0, sub_chunk=SHAPE, **kw),
-                           compressors=None, filters=None)
+        z = g.create_array(
+            "data",
+            shape=a.shape,
+            chunks=chunk,
+            dtype="float32",
+            serializer=codec.SkipZFPCodec(rate=8.0, sub_chunk=SHAPE, **kw),
+            compressors=None,
+            filters=None,
+        )
         z[:] = a
         codec.write_meta(z, a)
         arrs[i] = z
@@ -272,5 +301,7 @@ def test_sub_chunk_query_matches_small_chunks(subbed, case, q, gap, max_req):
     n_layer = len(SUB_CASES[case][1].get("layers", (8.0,)))
     for k in range(n_layer):
         r = LAYERS[k] if n_layer > 1 else 8.0
-        res = query.query_gt(arrs[case], th, layer=k, merge_gap_blocks=gap, max_chunk_requests=max_req)
+        res = query.query_gt(
+            arrs[case], th, layer=k, merge_gap_blocks=gap, max_chunk_requests=max_req
+        )
         assert res.count == int((ref[r].astype(np.float64) > th).sum())

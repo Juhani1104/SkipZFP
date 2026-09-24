@@ -240,7 +240,9 @@ class SkipZFPCodec(ArrayBytesCodec):
         object.__setattr__(self, "block_order", order)
 
         sub_chunk = tuple(int(x) for x in self.sub_chunk)
-        if sub_chunk and (len(sub_chunk) != 3 or any(x <= 0 or x % self.block_dim for x in sub_chunk)):
+        if sub_chunk and (
+            len(sub_chunk) != 3 or any(x <= 0 or x % self.block_dim for x in sub_chunk)
+        ):
             raise ValueError("sub_chunk must be three positive multiples of block_dim")
         object.__setattr__(self, "sub_chunk", sub_chunk)
 
@@ -314,7 +316,9 @@ class SkipZFPCodec(ArrayBytesCodec):
             )
 
         if any(c % u for c, u in zip(shape, self.unit(shape))):
-            raise ValueError(f"chunk {shape} is not divisible by sub_chunk {self.sub_chunk}")
+            raise ValueError(
+                f"chunk {shape} is not divisible by sub_chunk {self.sub_chunk}"
+            )
 
         dt = np.dtype(spec.dtype.to_native_dtype())
         if dt != np.dtype("float32"):
@@ -369,13 +373,19 @@ class SkipZFPCodec(ArrayBytesCodec):
         rank = block_rank(unit, self.block_order, self.block_dim)
         rows = []
         for sl in unit_slices(shape, unit):
-            r = native().encode(arr[sl], self.rate, self.block_dim).reshape(len(rank), -1)
+            r = (
+                native()
+                .encode(arr[sl], self.rate, self.block_dim)
+                .reshape(len(rank), -1)
+            )
             ranked = np.empty_like(r)
             ranked[rank] = r
             rows.append(ranked)
         rows = np.concatenate(rows)
         cuts = np.cumsum((0, *self.layer_bytes))
-        return np.concatenate([rows[:, a:b].reshape(-1) for a, b in zip(cuts[:-1], cuts[1:])])
+        return np.concatenate(
+            [rows[:, a:b].reshape(-1) for a, b in zip(cuts[:-1], cuts[1:])]
+        )
 
     def unpack(self, buf: np.ndarray, shape: tuple[int, int, int]) -> np.ndarray:
         if self.plain(shape):
@@ -385,23 +395,39 @@ class SkipZFPCodec(ArrayBytesCodec):
         rank = block_rank(unit, self.block_order, self.block_dim)
         n = int(np.prod([s // self.block_dim for s in shape]))
         cuts = np.cumsum((0, *(n * b for b in self.layer_bytes)))
-        rows = np.concatenate([buf[a:b].reshape(n, -1) for a, b in zip(cuts[:-1], cuts[1:])], axis=1)
+        rows = np.concatenate(
+            [buf[a:b].reshape(n, -1) for a, b in zip(cuts[:-1], cuts[1:])], axis=1
+        )
         out = np.empty(shape, dtype=np.float32)
         for i, sl in enumerate(unit_slices(shape, unit)):
             ranked = rows[i * len(rank) : (i + 1) * len(rank)]
-            out[sl] = native().decode(np.ascontiguousarray(ranked[rank]).reshape(-1), unit, self.rate, self.block_dim)
+            out[sl] = native().decode(
+                np.ascontiguousarray(ranked[rank]).reshape(-1),
+                unit,
+                self.rate,
+                self.block_dim,
+            )
         return out
 
 
-def unit_slices(shape: tuple[int, ...], unit: tuple[int, ...]) -> list[tuple[slice, ...]]:
+def unit_slices(
+    shape: tuple[int, ...], unit: tuple[int, ...]
+) -> list[tuple[slice, ...]]:
     grid = tuple(s // u for s, u in zip(shape, unit))
-    return [tuple(slice(i * u, (i + 1) * u) for i, u in zip(idx, unit)) for idx in np.ndindex(*grid)]
+    return [
+        tuple(slice(i * u, (i + 1) * u) for i, u in zip(idx, unit))
+        for idx in np.ndindex(*grid)
+    ]
 
 
-def block_rank(shape: tuple[int, ...], order: tuple[int, ...], block_dim: int = 4) -> np.ndarray:
+def block_rank(
+    shape: tuple[int, ...], order: tuple[int, ...], block_dim: int = 4
+) -> np.ndarray:
     blocks = tuple(s // block_dim for s in shape)
     coords = np.indices(blocks).reshape(len(blocks), -1)
-    return np.ravel_multi_index(tuple(coords[a] for a in order), tuple(blocks[a] for a in order))
+    return np.ravel_multi_index(
+        tuple(coords[a] for a in order), tuple(blocks[a] for a in order)
+    )
 
 
 def meta_size(codec: SkipZFPCodec, chunk: tuple[int, ...]) -> int:
@@ -436,7 +462,9 @@ def write_meta(
         raise ValueError("data must match the array shape and divide into whole chunks")
 
     if not arr.path:
-        raise ValueError("the array must live inside a group so metadata can sit next to it")
+        raise ValueError(
+            "the array must live inside a group so metadata can sit next to it"
+        )
 
     unit = codec.unit(chunk)
     grid = tuple(s // u for s, u in zip(arr.shape, unit))
@@ -461,7 +489,9 @@ def write_meta(
         offs = per[-1][12:].reshape(-1, 2)
         ranked = np.empty_like(offs)
         ranked[rank] = offs
-        return np.concatenate([per[-1][:8], *(m[8:12] for m in per), ranked.reshape(-1)])
+        return np.concatenate(
+            [per[-1][:8], *(m[8:12] for m in per), ranked.reshape(-1)]
+        )
 
     idxs = list(np.ndindex(*grid))
     with ThreadPoolExecutor(threads) as ex:

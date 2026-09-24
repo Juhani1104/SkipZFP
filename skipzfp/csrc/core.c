@@ -361,8 +361,9 @@ SzResult szfp_meta(
                 for (size_t dx = 0; dx < 4; dx++) {
                     for (size_t dy = 0; dy < 4; dy++) {
                         for (size_t dz = 0; dz < 4; dz++) {
-                            size_t idx =
-                                get_index3(4 * bx + dx, 4 * by + dy, 4 * bz + dz, ny, nz);
+                            size_t idx = get_index3(
+                                4 * bx + dx, 4 * by + dy, 4 * bz + dz, ny, nz
+                            );
                             float v = chunk[idx];
                             double err = fabs((double)v - (double)dec[idx]);
 

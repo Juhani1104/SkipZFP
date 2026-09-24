@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import collections
 import ctypes
-import os
 import itertools
+import os
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -189,7 +189,6 @@ class _Native:
         )
         self.check(code, "szfp_count_gt_blocks")
         return int(out.value)
-
 
     def merge(
         self,
@@ -545,18 +544,24 @@ async def read_meta(arr: zarr.Array, lt: _Layout) -> tuple[np.ndarray, int, int]
     return data, data.nbytes, n_obj
 
 
-def unit_to_chunk(lt: _Layout, unit_ids: np.ndarray, ranks: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def unit_to_chunk(
+    lt: _Layout, unit_ids: np.ndarray, ranks: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     subs = tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape))
     n_unit = int(np.prod(lt.unit_grid))
     u = np.unravel_index(np.arange(n_unit), lt.unit_grid)
-    u_chunk = np.ravel_multi_index(tuple(x // s for x, s in zip(u, subs)), lt.grid_shape)
+    u_chunk = np.ravel_multi_index(
+        tuple(x // s for x, s in zip(u, subs)), lt.grid_shape
+    )
     u_sub = np.ravel_multi_index(tuple(x % s for x, s in zip(u, subs)), subs)
 
     counts = np.bincount(unit_ids, minlength=n_unit)
     starts = np.cumsum(counts) - counts
     u_order = np.lexsort((u_sub, u_chunk))
     seg = counts[u_order]
-    perm = np.repeat(starts[u_order] - (np.cumsum(seg) - seg), seg) + np.arange(len(unit_ids))
+    perm = np.repeat(starts[u_order] - (np.cumsum(seg) - seg), seg) + np.arange(
+        len(unit_ids)
+    )
 
     uid = unit_ids[perm]
     blocks = u_sub[uid] * lt.blocks_per_unit + ranks[perm].astype(np.int64)
@@ -567,7 +572,9 @@ def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
     m = meta.reshape(-1, lt.meta_size)
     n_layer = len(lt.layers)
     eps = m[:, 8 + 4 * layer : 12 + 4 * layer]
-    return np.ascontiguousarray(np.concatenate([m[:, :8], eps, m[:, 8 + 4 * n_layer :]], axis=1))
+    return np.ascontiguousarray(
+        np.concatenate([m[:, :8], eps, m[:, 8 + 4 * n_layer :]], axis=1)
+    )
 
 
 async def stream_count(
@@ -589,9 +596,13 @@ async def stream_count(
         return n, time.perf_counter() - t0
 
     async def one(req: _MergedRange) -> tuple[int, int, float]:
-        data = await read_one(store, _Range(key=req.key, start=req.start, end=req.end), sem)
+        data = await read_one(
+            store, _Range(key=req.key, start=req.start, end=req.end), sem
+        )
         rows = blocks[req.item_start : req.item_end].astype(np.int64) - req.first_block
-        n, sec = await loop.run_in_executor(pool(), count, data, (rows * block_size).astype(np.uint64))
+        n, sec = await loop.run_in_executor(
+            pool(), count, data, (rows * block_size).astype(np.uint64)
+        )
         return n, len(data), sec
 
     parts = await asyncio.gather(*(one(r) for r in merged))
@@ -621,18 +632,20 @@ def merge_ranges(
         chunks = chunk_ids[order]
         blocks = block_ids[order]
 
-    out_chunk, out_first, out_last, out_item = native().merge(chunks, blocks, merge_gap_blocks)
+    out_chunk, out_first, out_last, out_item = native().merge(
+        chunks, blocks, merge_gap_blocks
+    )
     item_end = np.r_[out_item[1:], n]
     out = [
         _MergedRange(
             key=keys[int(c)],
             start=base + int(f) * block_size,
-            end=base + (int(l) + 1) * block_size,
+            end=base + (int(last) + 1) * block_size,
             first_block=int(f),
             item_start=int(i),
             item_end=int(e),
         )
-        for c, f, l, i, e in zip(out_chunk, out_first, out_last, out_item, item_end)
+        for c, f, last, i, e in zip(out_chunk, out_first, out_last, out_item, item_end)
     ]
 
     return out, blocks
@@ -714,7 +727,14 @@ async def query_gt_async(
     plan_sec = time.perf_counter() - t1
 
     per_layer = [
-        merge_ranges(keys, chunk_ids, block_ids, lt.layer_bytes[j], merge_gap_blocks, lt.layer_starts[j])
+        merge_ranges(
+            keys,
+            chunk_ids,
+            block_ids,
+            lt.layer_bytes[j],
+            merge_gap_blocks,
+            lt.layer_starts[j],
+        )
         for j in range(layer + 1)
     ]
     sorted_blocks = per_layer[0][1]
@@ -723,7 +743,9 @@ async def query_gt_async(
 
     dense: set[str] = set()
     if layer > 0:
-        per_key = collections.Counter(req.key for merged, _ in per_layer for req in merged)
+        per_key = collections.Counter(
+            req.key for merged, _ in per_layer for req in merged
+        )
         dense = {k for k, n in per_key.items() if n > max_chunk_requests}
     prefix_end = int(cols[-1]) * lt.blocks_per_chunk
 
@@ -748,7 +770,9 @@ async def query_gt_async(
         for j, (merged, _) in enumerate(per_layer):
             for req in merged:
                 if req.key not in dense:
-                    payload_reqs.append(_Range(key=req.key, start=req.start, end=req.end))
+                    payload_reqs.append(
+                        _Range(key=req.key, start=req.start, end=req.end)
+                    )
                     fills.append((j, req))
         chunk_of = {k: c for c, k in enumerate(keys)}
         for k in sorted(dense):
@@ -768,7 +792,10 @@ async def query_gt_async(
         for data, (j, item) in zip(payload_parts, fills):
             buf = np.frombuffer(data, dtype=np.uint8)
             if j is not None:
-                rows = sorted_blocks[item.item_start : item.item_end].astype(np.int64) - item.first_block
+                rows = (
+                    sorted_blocks[item.item_start : item.item_end].astype(np.int64)
+                    - item.first_block
+                )
                 out[item.item_start : item.item_end, cols[j] : cols[j + 1]] = (
                     buf.reshape(-1, lt.layer_bytes[j])[rows]
                 )
@@ -777,8 +804,13 @@ async def query_gt_async(
                 lo, hi = np.searchsorted(sorted_chunks, [c, c + 1])
                 ids = sorted_blocks[lo:hi].astype(np.int64)
                 for jj in range(layer + 1):
-                    seg = buf[lt.layer_starts[jj] : lt.layer_starts[jj] + lt.blocks_per_chunk * lt.layer_bytes[jj]]
-                    out[lo:hi, cols[jj] : cols[jj + 1]] = seg.reshape(-1, lt.layer_bytes[jj])[ids]
+                    seg = buf[
+                        lt.layer_starts[jj] : lt.layer_starts[jj]
+                        + lt.blocks_per_chunk * lt.layer_bytes[jj]
+                    ]
+                    out[lo:hi, cols[jj] : cols[jj + 1]] = seg.reshape(
+                        -1, lt.layer_bytes[jj]
+                    )[ids]
         blocks = out.reshape(-1)
 
         t1 = time.perf_counter()

@@ -392,7 +392,11 @@ int szfp_decode_blocks(
 #endif
     for (size_t bid = 0; bid < block_count; bid++) {
         if (decode_block(
-                blocks + bid * block_nbytes, block_nbytes, rate, block_dim, out + bid * nval
+                blocks + bid * block_nbytes,
+                block_nbytes,
+                rate,
+                block_dim,
+                out + bid * nval
             ) != SZFP_OK) {
             failed = 1;
         }
@@ -424,8 +428,8 @@ int szfp_merge_ranges(
         return SZFP_OK;
     }
 
-    if (chunk_ids == NULL || block_ids == NULL || out_chunk == NULL || out_first == NULL ||
-        out_last == NULL || out_item_start == NULL) {
+    if (chunk_ids == NULL || block_ids == NULL || out_chunk == NULL ||
+        out_first == NULL || out_last == NULL || out_item_start == NULL) {
         return SZFP_ERR_NULL;
     }
 

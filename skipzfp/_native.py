@@ -9,5 +9,7 @@ from pathlib import Path
 def load_library() -> ctypes.CDLL:
     path = Path(__file__).with_name("_core.so")
     if not path.exists():
-        raise FileNotFoundError(f"could not find {path}; build it with `pip install -e .`")
+        raise FileNotFoundError(
+            f"could not find {path}; build it with `pip install -e .`"
+        )
     return ctypes.CDLL(str(path))
