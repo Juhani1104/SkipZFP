@@ -651,35 +651,6 @@ def merge_ranges(
     return out, blocks
 
 
-def extract_blocks(
-    parts: Sequence[bytes],
-    merged: Sequence[_MergedRange],
-    blocks: np.ndarray,
-    block_size: int,
-) -> np.ndarray:
-    out = np.empty(len(blocks) * block_size, dtype=np.uint8)
-    cur = 0
-
-    for data, req in zip(parts, merged, strict=True):
-        n_block = (req.end - req.start) // block_size
-        mat = np.frombuffer(data, dtype=np.uint8).reshape(n_block, block_size)
-
-        target = blocks[req.item_start : req.item_end]
-        rows = target.astype(np.int64) - req.first_block
-        picked = mat[rows]
-
-        n_pick = len(target)
-        start = cur * block_size
-        end = (cur + n_pick) * block_size
-        out[start:end] = picked.reshape(-1)
-        cur += n_pick
-
-    if cur != len(blocks):
-        raise RuntimeError("failed to assemble MAYBE blocks")
-
-    return out
-
-
 async def query_gt_async(
     arr: zarr.Array,
     threshold: float,
@@ -694,8 +665,12 @@ async def query_gt_async(
     if not isinstance(arr, zarr.Array):
         raise TypeError("query_gt_async expects an opened zarr.Array")
 
+    if request_concurrency <= 0:
+        raise ValueError("request_concurrency must be greater than 0")
     if request_batch_size is None:
         request_batch_size = max(request_concurrency, request_concurrency * 4)
+    if request_batch_size <= 0:
+        raise ValueError("request_batch_size must be greater than 0")
 
     t0 = time.perf_counter()
 

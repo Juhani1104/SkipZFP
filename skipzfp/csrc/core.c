@@ -167,6 +167,14 @@ SzResult szfp_decode_block(
         return SZ_ERR_ARG;
     }
 
+    if (dims < 1 || dims > 4) {
+        return SZ_ERR_DIMS;
+    }
+
+    if ((double)block_nbytes * 8.0 < rate * (double)((size_t)1 << (2 * dims))) {
+        return SZ_ERR_SIZE;
+    }
+
     stream = stream_open((void*)block_bytes, block_nbytes);
     if (stream == NULL) {
         return SZ_ERR_STREAM;
