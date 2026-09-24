@@ -222,6 +222,7 @@ class SkipZFPCodec(ArrayBytesCodec):
     block_dim: int = 4
     layers: tuple[float, ...] = ()
     block_order: tuple[int, ...] = (0, 1, 2)
+    sub_chunk: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         if self.rate <= 0:
@@ -241,14 +242,26 @@ class SkipZFPCodec(ArrayBytesCodec):
             raise ValueError("block_order must be a permutation of (0, 1, 2)")
         object.__setattr__(self, "block_order", order)
 
+        sub_chunk = tuple(int(x) for x in self.sub_chunk)
+        if sub_chunk and (len(sub_chunk) != 3 or any(x <= 0 or x % self.block_dim for x in sub_chunk)):
+            raise ValueError("sub_chunk must be three positive multiples of block_dim")
+        object.__setattr__(self, "sub_chunk", sub_chunk)
+
+    def unit(self, shape: tuple[int, ...]) -> tuple[int, ...]:
+        """metadata 與 payload 排列的單位：sub_chunk，沒設定就是整個 chunk。"""
+        return self.sub_chunk or tuple(shape)
+
     @property
     def layer_bytes(self) -> tuple[int, ...]:
         prev = (0.0, *self.layers[:-1])
         return tuple(int(8 * (r - p)) for r, p in zip(self.layers, prev))
 
-    @property
-    def plain(self) -> bool:
-        return len(self.layers) == 1 and self.block_order == (0, 1, 2)
+    def plain(self, shape: tuple[int, ...]) -> bool:
+        return (
+            len(self.layers) == 1
+            and self.block_order == (0, 1, 2)
+            and self.unit(shape) == tuple(shape)
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, JSON]) -> Self:
@@ -264,6 +277,7 @@ class SkipZFPCodec(ArrayBytesCodec):
             block_dim=int(cfg.get("block_dim", 4)),
             layers=tuple(cfg.get("layers") or ()),
             block_order=tuple(cfg.get("block_order") or (0, 1, 2)),
+            sub_chunk=tuple(cfg.get("sub_chunk") or ()),
         )
 
     def to_dict(self) -> dict[str, JSON]:
@@ -274,6 +288,7 @@ class SkipZFPCodec(ArrayBytesCodec):
                 "block_dim": self.block_dim,
                 "layers": list(self.layers),
                 "block_order": list(self.block_order),
+                "sub_chunk": list(self.sub_chunk),
             },
         }
 
@@ -302,6 +317,9 @@ class SkipZFPCodec(ArrayBytesCodec):
                 f"each chunk dimension must be divisible by block_dim={self.block_dim}"
             )
 
+        if any(c % u for c, u in zip(shape, self.unit(shape))):
+            raise ValueError(f"chunk {shape} is not divisible by sub_chunk {self.sub_chunk}")
+
         dt = np.dtype(spec.dtype.to_native_dtype())
         if dt != np.dtype("float32"):
             raise TypeError("SkipZFP currently only supports float32")
@@ -329,14 +347,7 @@ class SkipZFPCodec(ArrayBytesCodec):
             dtype=np.float32,
         ).reshape(shape)
 
-        out = await asyncio.to_thread(
-            native().encode,
-            arr,
-            self.rate,
-            self.block_dim,
-        )
-        if not self.plain:
-            out = self.to_layers(out, shape)
+        out = await asyncio.to_thread(self.pack, arr)
         return chunk_spec.prototype.buffer.from_array_like(out)
 
     async def _decode_single(
@@ -350,32 +361,47 @@ class SkipZFPCodec(ArrayBytesCodec):
             dtype=np.uint8,
         ).reshape(-1)
 
-        if not self.plain:
-            buf = self.from_layers(buf, shape)
-
-        out = await asyncio.to_thread(
-            native().decode,
-            buf,
-            shape,
-            self.rate,
-            self.block_dim,
-        )
+        out = await asyncio.to_thread(self.unpack, buf, shape)
         return chunk_spec.prototype.nd_buffer.from_ndarray_like(out)
 
-    def to_layers(self, buf: np.ndarray, shape: tuple[int, int, int]) -> np.ndarray:
-        rows = buf.reshape(-1, sum(self.layer_bytes))
-        ranked = np.empty_like(rows)
-        ranked[block_rank(shape, self.block_order, self.block_dim)] = rows
-        cuts = np.cumsum((0, *self.layer_bytes))
-        return np.concatenate([ranked[:, a:b].reshape(-1) for a, b in zip(cuts[:-1], cuts[1:])])
+    def pack(self, arr: np.ndarray) -> np.ndarray:
+        """壓縮一個 chunk：逐個 sub_chunk 壓縮 → 套 block 順序 → 依 sub_chunk 串接 → 依層排放。"""
+        shape = tuple(arr.shape)
+        if self.plain(shape):
+            return native().encode(arr, self.rate, self.block_dim)
 
-    def from_layers(self, buf: np.ndarray, shape: tuple[int, int, int]) -> np.ndarray:
+        unit = self.unit(shape)
+        rank = block_rank(unit, self.block_order, self.block_dim)
+        rows = []
+        for sl in unit_slices(shape, unit):
+            r = native().encode(arr[sl], self.rate, self.block_dim).reshape(len(rank), -1)
+            ranked = np.empty_like(r)
+            ranked[rank] = r
+            rows.append(ranked)
+        rows = np.concatenate(rows)
+        cuts = np.cumsum((0, *self.layer_bytes))
+        return np.concatenate([rows[:, a:b].reshape(-1) for a, b in zip(cuts[:-1], cuts[1:])])
+
+    def unpack(self, buf: np.ndarray, shape: tuple[int, int, int]) -> np.ndarray:
+        if self.plain(shape):
+            return native().decode(buf, shape, self.rate, self.block_dim)
+
+        unit = self.unit(shape)
+        rank = block_rank(unit, self.block_order, self.block_dim)
         n = int(np.prod([s // self.block_dim for s in shape]))
         cuts = np.cumsum((0, *(n * b for b in self.layer_bytes)))
-        ranked = np.concatenate(
-            [buf[a:b].reshape(n, -1) for a, b in zip(cuts[:-1], cuts[1:])], axis=1
-        )
-        return np.ascontiguousarray(ranked[block_rank(shape, self.block_order, self.block_dim)]).reshape(-1)
+        rows = np.concatenate([buf[a:b].reshape(n, -1) for a, b in zip(cuts[:-1], cuts[1:])], axis=1)
+        out = np.empty(shape, dtype=np.float32)
+        for i, sl in enumerate(unit_slices(shape, unit)):
+            ranked = rows[i * len(rank) : (i + 1) * len(rank)]
+            out[sl] = native().decode(np.ascontiguousarray(ranked[rank]).reshape(-1), unit, self.rate, self.block_dim)
+        return out
+
+
+def unit_slices(shape: tuple[int, ...], unit: tuple[int, ...]) -> list[tuple[slice, ...]]:
+    """chunk 內各 sub_chunk 的切片，C-order。"""
+    grid = tuple(s // u for s, u in zip(shape, unit))
+    return [tuple(slice(i * u, (i + 1) * u) for i, u in zip(idx, unit)) for idx in np.ndindex(*grid)]
 
 
 def block_rank(shape: tuple[int, ...], order: tuple[int, ...], block_dim: int = 4) -> np.ndarray:
@@ -419,8 +445,10 @@ def write_meta(
     if not arr.path:
         raise ValueError("the array must live inside a group so metadata can sit next to it")
 
-    size = meta_size(codec, chunk)
-    rank = block_rank(chunk, codec.block_order, codec.block_dim)
+    unit = codec.unit(chunk)
+    grid = tuple(s // u for s, u in zip(arr.shape, unit))
+    size = meta_size(codec, unit)
+    rank = block_rank(unit, codec.block_order, codec.block_dim)
     path = path or f"{arr.path}_meta"
 
     meta = zarr.create_array(
@@ -435,7 +463,7 @@ def write_meta(
     )
 
     def one(idx: tuple[int, ...]) -> np.ndarray:
-        sl = tuple(slice(i * c, (i + 1) * c) for i, c in zip(idx, chunk))
+        sl = tuple(slice(i * u, (i + 1) * u) for i, u in zip(idx, unit))
         per = [native().meta(data[sl], r, codec.block_dim) for r in codec.layers]
         offs = per[-1][12:].reshape(-1, 2)
         ranked = np.empty_like(offs)

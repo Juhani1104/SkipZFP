@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import collections
 import ctypes
+import os
 import itertools
 import time
 from collections.abc import Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
@@ -65,6 +67,32 @@ class _Native:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         self.lib.szfp_count_gt_blocks.restype = ctypes.c_int
+
+        self.lib.szfp_merge_ranges.argtypes = [
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.lib.szfp_merge_ranges.restype = ctypes.c_int
+
+        self.lib.szfp_count_offsets.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_double,
+            ctypes.c_int,
+            ctypes.c_double,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.lib.szfp_count_offsets.restype = ctypes.c_int
 
     @staticmethod
     def check(code: int, name: str) -> None:
@@ -165,7 +193,74 @@ class _Native:
         return int(out.value)
 
 
+    def merge(
+        self,
+        chunk_ids: np.ndarray,
+        block_ids: np.ndarray,
+        gap: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        n = len(block_ids)
+        ch = np.ascontiguousarray(chunk_ids, dtype=np.uint32)
+        bl = np.ascontiguousarray(block_ids, dtype=np.uint32)
+        out_chunk = np.empty(n, dtype=np.uint32)
+        out_first = np.empty(n, dtype=np.uint64)
+        out_last = np.empty(n, dtype=np.uint64)
+        out_item = np.empty(n, dtype=np.uint64)
+        m = ctypes.c_size_t()
+
+        code = self.lib.szfp_merge_ranges(
+            ch.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
+            bl.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
+            n,
+            gap,
+            out_chunk.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
+            out_first.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
+            out_last.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
+            out_item.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
+            ctypes.byref(m),
+        )
+        self.check(code, "szfp_merge_ranges")
+        k = int(m.value)
+        return out_chunk[:k], out_first[:k], out_last[:k], out_item[:k]
+
+    def count_offsets(
+        self,
+        data: bytes,
+        offsets: np.ndarray,
+        block_size: int,
+        rate: float,
+        block_dim: int,
+        th: float,
+    ) -> int:
+        offs = np.ascontiguousarray(offsets, dtype=np.uint64)
+        out = ctypes.c_size_t()
+
+        code = self.lib.szfp_count_offsets(
+            data,
+            len(data),
+            offs.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
+            len(offs),
+            block_size,
+            rate,
+            block_dim,
+            th,
+            ctypes.byref(out),
+        )
+        self.check(code, "szfp_count_offsets")
+        return int(out.value)
+
+
 _NATIVE: _Native | None = None
+_POOL: ThreadPoolExecutor | None = None
+
+
+def pool() -> ThreadPoolExecutor:
+    global _POOL
+
+    if _POOL is None:
+        _POOL = ThreadPoolExecutor(os.cpu_count() or 4)
+
+    return _POOL
 
 
 def native() -> _Native:
@@ -219,6 +314,9 @@ class _Layout:
     layers: tuple[float, ...]
     layer_bytes: tuple[int, ...]
     layer_starts: tuple[int, ...]
+    unit_shape: tuple[int, int, int]
+    unit_grid: tuple[int, int, int]
+    blocks_per_unit: int
 
 
 @dataclass(frozen=True)
@@ -339,13 +437,16 @@ def get_layout(arr: zarr.Array) -> _Layout:
 
     block_size = data_size // blocks_per_chunk
 
+    unit = codec.unit(chunk_shape)
+    blocks_per_unit = int(np.prod([u // block_dim for u in unit]))
+
     return _Layout(
         chunk_shape=chunk_shape,
         grid_shape=grid_shape,
         rate=rate,
         block_dim=block_dim,
         data_size=data_size,
-        meta_size=meta_size(codec, chunk_shape),
+        meta_size=meta_size(codec, unit),
         block_size=block_size,
         blocks_per_chunk=blocks_per_chunk,
         values_per_block=values_per_block,
@@ -354,6 +455,9 @@ def get_layout(arr: zarr.Array) -> _Layout:
         layer_starts=tuple(
             int(x) for x in np.cumsum((0, *codec.layer_bytes[:-1])) * blocks_per_chunk
         ),
+        unit_shape=unit,
+        unit_grid=tuple(g * (c // u) for g, c, u in zip(grid_shape, chunk_shape, unit)),
+        blocks_per_unit=blocks_per_unit,
     )
 
 
@@ -435,12 +539,22 @@ async def read_meta(arr: zarr.Array, lt: _Layout) -> tuple[np.ndarray, int, int]
         mode="r",
     )
 
-    if tuple(meta.shape) != (*lt.grid_shape, lt.meta_size):
+    if tuple(meta.shape) != (*lt.unit_grid, lt.meta_size):
         raise ValueError(f"metadata shape {meta.shape} does not match the array layout")
 
     data = np.ascontiguousarray(await meta.getitem(...), dtype=np.uint8).reshape(-1)
     n_obj = int(np.prod([ceildiv(s, c) for s, c in zip(meta.shape, meta.chunks)]))
     return data, data.nbytes, n_obj
+
+
+def unit_to_chunk(lt: _Layout, unit_ids: np.ndarray, ranks: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """sub_chunk 編號 + sub_chunk 內的 block 位置 → Zarr chunk 編號 + chunk 內的 block 位置。"""
+    subs = tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape))
+    u = np.unravel_index(unit_ids.astype(np.int64), lt.unit_grid)
+    chunk = np.ravel_multi_index(tuple(x // s for x, s in zip(u, subs)), lt.grid_shape)
+    sub_idx = np.ravel_multi_index(tuple(x % s for x, s in zip(u, subs)), subs)
+    blocks = sub_idx * lt.blocks_per_unit + ranks.astype(np.int64)
+    return chunk.astype(np.uint32), blocks.astype(np.uint32)
 
 
 def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
@@ -449,6 +563,35 @@ def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
     n_layer = len(lt.layers)
     eps = m[:, 8 + 4 * layer : 12 + 4 * layer]
     return np.ascontiguousarray(np.concatenate([m[:, :8], eps, m[:, 8 + 4 * n_layer :]], axis=1))
+
+
+async def stream_count(
+    store: Any,
+    merged: Sequence[_MergedRange],
+    blocks: np.ndarray,
+    block_size: int,
+    rate: float,
+    block_dim: int,
+    threshold: float,
+    concurrency: int,
+) -> tuple[int, int, float]:
+    """每個 range 一下載完就交給 C 原地解碼計數，讓解碼跟下載重疊。"""
+    loop = asyncio.get_running_loop()
+    sem = asyncio.Semaphore(concurrency)
+
+    def count(data: bytes, offs: np.ndarray) -> tuple[int, float]:
+        t0 = time.perf_counter()
+        n = native().count_offsets(data, offs, block_size, rate, block_dim, threshold)
+        return n, time.perf_counter() - t0
+
+    async def one(req: _MergedRange) -> tuple[int, int, float]:
+        data = await read_one(store, _Range(key=req.key, start=req.start, end=req.end), sem)
+        rows = blocks[req.item_start : req.item_end].astype(np.int64) - req.first_block
+        n, sec = await loop.run_in_executor(pool(), count, data, (rows * block_size).astype(np.uint64))
+        return n, len(data), sec
+
+    parts = await asyncio.gather(*(one(r) for r in merged))
+    return sum(p[0] for p in parts), sum(p[1] for p in parts), sum(p[2] for p in parts)
 
 
 def merge_ranges(
@@ -470,48 +613,19 @@ def merge_ranges(
     chunks = chunk_ids[order]
     blocks = block_ids[order]
 
-    out: list[_MergedRange] = []
-    item_start = 0
-    chunk = int(chunks[0])
-    first = int(blocks[0])
-    last = first
-
-    for i in range(1, n):
-        next_chunk = int(chunks[i])
-        next_block = int(blocks[i])
-
-        same_range = next_chunk == chunk and next_block <= last + merge_gap_blocks + 1
-
-        if same_range:
-            last = next_block
-            continue
-
-        out.append(
-            _MergedRange(
-                key=keys[chunk],
-                start=base + first * block_size,
-                end=base + (last + 1) * block_size,
-                first_block=first,
-                item_start=item_start,
-                item_end=i,
-            )
-        )
-
-        item_start = i
-        chunk = next_chunk
-        first = next_block
-        last = next_block
-
-    out.append(
+    out_chunk, out_first, out_last, out_item = native().merge(chunks, blocks, merge_gap_blocks)
+    item_end = np.r_[out_item[1:], n]
+    out = [
         _MergedRange(
-            key=keys[chunk],
-            start=base + first * block_size,
-            end=base + (last + 1) * block_size,
-            first_block=first,
-            item_start=item_start,
-            item_end=n,
+            key=keys[int(c)],
+            start=base + int(f) * block_size,
+            end=base + (int(l) + 1) * block_size,
+            first_block=int(f),
+            item_start=int(i),
+            item_end=int(e),
         )
-    )
+        for c, f, l, i, e in zip(out_chunk, out_first, out_last, out_item, item_end)
+    ]
 
     return out, blocks
 
@@ -579,15 +693,16 @@ async def query_gt_async(
     meta_read_sec = time.perf_counter() - t1
 
     t1 = time.perf_counter()
-    chunk_ids, block_ids, n_in, n_out = await asyncio.to_thread(
+    unit_ids, ranks, n_in, n_out = await asyncio.to_thread(
         native().plan,
         plan_meta(meta, lt, layer),
-        len(keys),
+        int(np.prod(lt.unit_grid)),
         lt.meta_size - 4 * (len(lt.layers) - 1),
-        lt.blocks_per_chunk,
+        lt.blocks_per_unit,
         float(threshold),
         threads,
     )
+    chunk_ids, block_ids = unit_to_chunk(lt, unit_ids, ranks)
     plan_sec = time.perf_counter() - t1
 
     per_layer = [
@@ -606,60 +721,77 @@ async def query_gt_async(
         dense = {k for k, n in per_key.items() if n > max_chunk_requests}
     prefix_end = int(cols[-1]) * lt.blocks_per_chunk
 
-    payload_reqs = []
-    fills = []
-    for j, (merged, _) in enumerate(per_layer):
-        for req in merged:
-            if req.key not in dense:
-                payload_reqs.append(_Range(key=req.key, start=req.start, end=req.end))
-                fills.append((j, req))
-    chunk_of = {k: c for c, k in enumerate(keys)}
-    for k in sorted(dense):
-        payload_reqs.append(_Range(key=k, start=0, end=prefix_end))
-        fills.append((None, k))
+    if layer == 0:
+        merged0, sorted0 = per_layer[0]
+        t1 = time.perf_counter()
+        n_maybe_val, payload_bytes, decode_sec = await stream_count(
+            store,
+            merged0,
+            sorted0,
+            lt.layer_bytes[0],
+            rate,
+            lt.block_dim,
+            float(threshold),
+            request_concurrency,
+        )
+        payload_read_sec = time.perf_counter() - t1
+        n_payload_reqs = len(merged0)
+    else:
+        payload_reqs = []
+        fills = []
+        for j, (merged, _) in enumerate(per_layer):
+            for req in merged:
+                if req.key not in dense:
+                    payload_reqs.append(_Range(key=req.key, start=req.start, end=req.end))
+                    fills.append((j, req))
+        chunk_of = {k: c for c, k in enumerate(keys)}
+        for k in sorted(dense):
+            payload_reqs.append(_Range(key=k, start=0, end=prefix_end))
+            fills.append((None, k))
 
-    t1 = time.perf_counter()
-    payload_parts = await read_ranges(
-        store,
-        payload_reqs,
-        concurrency=request_concurrency,
-        batch_size=request_batch_size,
-    )
-    payload_read_sec = time.perf_counter() - t1
+        t1 = time.perf_counter()
+        payload_parts = await read_ranges(
+            store,
+            payload_reqs,
+            concurrency=request_concurrency,
+            batch_size=request_batch_size,
+        )
+        payload_read_sec = time.perf_counter() - t1
 
-    out = np.empty((len(sorted_blocks), int(cols[-1])), dtype=np.uint8)
-    for data, (j, item) in zip(payload_parts, fills):
-        buf = np.frombuffer(data, dtype=np.uint8)
-        if j is not None:
-            rows = sorted_blocks[item.item_start : item.item_end].astype(np.int64) - item.first_block
-            out[item.item_start : item.item_end, cols[j] : cols[j + 1]] = (
-                buf.reshape(-1, lt.layer_bytes[j])[rows]
-            )
-        else:
-            c = chunk_of[item]
-            lo, hi = np.searchsorted(sorted_chunks, [c, c + 1])
-            ids = sorted_blocks[lo:hi].astype(np.int64)
-            for jj in range(layer + 1):
-                seg = buf[lt.layer_starts[jj] : lt.layer_starts[jj] + lt.blocks_per_chunk * lt.layer_bytes[jj]]
-                out[lo:hi, cols[jj] : cols[jj + 1]] = seg.reshape(-1, lt.layer_bytes[jj])[ids]
-    blocks = out.reshape(-1)
+        out = np.empty((len(sorted_blocks), int(cols[-1])), dtype=np.uint8)
+        for data, (j, item) in zip(payload_parts, fills):
+            buf = np.frombuffer(data, dtype=np.uint8)
+            if j is not None:
+                rows = sorted_blocks[item.item_start : item.item_end].astype(np.int64) - item.first_block
+                out[item.item_start : item.item_end, cols[j] : cols[j + 1]] = (
+                    buf.reshape(-1, lt.layer_bytes[j])[rows]
+                )
+            else:
+                c = chunk_of[item]
+                lo, hi = np.searchsorted(sorted_chunks, [c, c + 1])
+                ids = sorted_blocks[lo:hi].astype(np.int64)
+                for jj in range(layer + 1):
+                    seg = buf[lt.layer_starts[jj] : lt.layer_starts[jj] + lt.blocks_per_chunk * lt.layer_bytes[jj]]
+                    out[lo:hi, cols[jj] : cols[jj + 1]] = seg.reshape(-1, lt.layer_bytes[jj])[ids]
+        blocks = out.reshape(-1)
 
-    t1 = time.perf_counter()
-    n_maybe_val = await asyncio.to_thread(
-        native().count,
-        blocks,
-        len(sorted_blocks),
-        block_size,
-        rate,
-        lt.block_dim,
-        float(threshold),
-        threads,
-    )
-    decode_sec = time.perf_counter() - t1
+        t1 = time.perf_counter()
+        n_maybe_val = await asyncio.to_thread(
+            native().count,
+            blocks,
+            len(sorted_blocks),
+            block_size,
+            rate,
+            lt.block_dim,
+            float(threshold),
+            threads,
+        )
+        decode_sec = time.perf_counter() - t1
+        payload_bytes = sum(len(x) for x in payload_parts)
+        n_payload_reqs = len(payload_reqs)
 
     total_blocks = len(keys) * lt.blocks_per_chunk
     total_count = n_in * lt.values_per_block + n_maybe_val
-    payload_bytes = sum(len(x) for x in payload_parts)
     useful_bytes = len(sorted_blocks) * block_size
 
     return QueryResult(
@@ -671,7 +803,7 @@ async def query_gt_async(
         metadata_bytes_read=meta_bytes,
         payload_bytes_read=payload_bytes,
         metadata_requests=meta_requests,
-        payload_requests=len(payload_reqs),
+        payload_requests=n_payload_reqs,
         useful_payload_bytes=useful_bytes,
         payload_overread_bytes=payload_bytes - useful_bytes,
         metadata_read_seconds=meta_read_sec,

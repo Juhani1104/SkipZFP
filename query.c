@@ -399,3 +399,115 @@ int szfp_decode_blocks(
 
     return failed ? SZFP_ERR_ZFP : SZFP_OK;
 }
+
+int szfp_merge_ranges(
+    const uint32_t* chunk_ids,
+    const uint32_t* block_ids,
+    size_t n,
+    size_t gap_blocks,
+    uint32_t* out_chunk,
+    uint64_t* out_first,
+    uint64_t* out_last,
+    uint64_t* out_item_start,
+    size_t* out_n
+) {
+    size_t m = 0;
+
+    if (out_n == NULL) {
+        return SZFP_ERR_NULL;
+    }
+
+    *out_n = 0;
+
+    if (n == 0) {
+        return SZFP_OK;
+    }
+
+    if (chunk_ids == NULL || block_ids == NULL || out_chunk == NULL || out_first == NULL ||
+        out_last == NULL || out_item_start == NULL) {
+        return SZFP_ERR_NULL;
+    }
+
+    out_chunk[0] = chunk_ids[0];
+    out_first[0] = block_ids[0];
+    out_last[0] = block_ids[0];
+    out_item_start[0] = 0;
+
+    for (size_t i = 1; i < n; i++) {
+        if (chunk_ids[i] < chunk_ids[i - 1] ||
+            (chunk_ids[i] == chunk_ids[i - 1] && block_ids[i] <= block_ids[i - 1])) {
+            return SZFP_ERR_ARG;
+        }
+
+        if (chunk_ids[i] == out_chunk[m] &&
+            (uint64_t)block_ids[i] <= out_last[m] + (uint64_t)gap_blocks + 1u) {
+            out_last[m] = block_ids[i];
+            continue;
+        }
+
+        m++;
+        out_chunk[m] = chunk_ids[i];
+        out_first[m] = block_ids[i];
+        out_last[m] = block_ids[i];
+        out_item_start[m] = i;
+    }
+
+    *out_n = m + 1;
+    return SZFP_OK;
+}
+
+int szfp_count_offsets(
+    const unsigned char* buf,
+    size_t buf_size,
+    const uint64_t* offsets,
+    size_t n,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double threshold,
+    size_t* out_count
+) {
+    size_t nval;
+    size_t need_bytes;
+    size_t count = 0;
+    float vals[64];
+
+    if (out_count == NULL) {
+        return SZFP_ERR_NULL;
+    }
+
+    *out_count = 0;
+
+    if (n == 0) {
+        return SZFP_OK;
+    }
+
+    if (buf == NULL || offsets == NULL) {
+        return SZFP_ERR_NULL;
+    }
+
+    if (!block_layout(block_dim, rate, &nval, &need_bytes) || nval > 64) {
+        return SZFP_ERR_ARG;
+    }
+
+    if (block_nbytes != need_bytes) {
+        return SZFP_ERR_SIZE;
+    }
+
+    for (size_t i = 0; i < n; i++) {
+        if (offsets[i] > buf_size || buf_size - offsets[i] < block_nbytes) {
+            return SZFP_ERR_SIZE;
+        }
+
+        if (decode_block(buf + offsets[i], block_nbytes, rate, block_dim, vals) != SZFP_OK) {
+            return SZFP_ERR_ZFP;
+        }
+
+        for (size_t k = 0; k < nval; k++) {
+            count += (double)vals[k] > threshold;
+        }
+    }
+
+    *out_count = count;
+    return SZFP_OK;
+}

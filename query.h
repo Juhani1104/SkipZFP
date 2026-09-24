@@ -40,4 +40,28 @@ int szfp_decode_blocks(
     float* out
 );
 
+int szfp_merge_ranges(
+    const uint32_t* chunk_ids,
+    const uint32_t* block_ids,
+    size_t n,
+    size_t gap_blocks,
+    uint32_t* out_chunk,
+    uint64_t* out_first,
+    uint64_t* out_last,
+    uint64_t* out_item_start,
+    size_t* out_n
+);
+
+int szfp_count_offsets(
+    const unsigned char* buf,
+    size_t buf_size,
+    const uint64_t* offsets,
+    size_t n,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double threshold,
+    size_t* out_count
+);
+
 #endif
