@@ -14,7 +14,7 @@ test = ["pytest", "zfpy"]
 experiments = ["zfpy", "numcodecs", "obstore", "scipy", "gstools", "matplotlib"]
 
 [tool.setuptools]
-py-modules = ["codec", "query"]
+packages = ["skipzfp"]
 
 [project.entry-points."zarr.codecs"]
-"skipzfp" = "codec:SkipZFPCodec"
+"skipzfp" = "skipzfp.codec:SkipZFPCodec"

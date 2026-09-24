@@ -6,8 +6,7 @@ import zarr
 import zfpy
 from zarr.registry import register_codec
 
-import codec
-import query
+from skipzfp import codec, query
 
 register_codec("skipzfp", codec.SkipZFPCodec)
 

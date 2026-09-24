@@ -1,6 +1,7 @@
 .clang-format
 .vscode/
-core.so
+*.so
+build/
 .venv/
 __pycache__/
 skipzfp.egg-info/

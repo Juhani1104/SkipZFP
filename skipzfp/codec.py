@@ -4,7 +4,6 @@ import asyncio
 import ctypes
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, ClassVar, Self
 
 import numpy as np
@@ -13,6 +12,8 @@ from zarr.abc.codec import ArrayBytesCodec
 from zarr.core.array_spec import ArraySpec
 from zarr.core.buffer import Buffer, NDBuffer
 from zarr.core.common import JSON
+
+from ._native import load_library
 
 _ERR = {
     0: "SZ_OK",
@@ -31,11 +32,7 @@ _ERR = {
 
 class _Native:
     def __init__(self) -> None:
-        path = Path(__file__).with_name("core.so")
-        if not path.exists():
-            raise FileNotFoundError(f"could not find {path}; compile core.so first")
-
-        self.lib = ctypes.CDLL(str(path))
+        self.lib = load_library()
 
         self.lib.szfp_layout.argtypes = [
             ctypes.c_size_t,

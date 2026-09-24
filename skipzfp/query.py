@@ -15,19 +15,17 @@ from typing import Any
 
 import numpy as np
 import zarr
-from codec import META_ATTR, meta_size
 from zarr.abc.store import RangeByteRequest
 from zarr.core.buffer import default_buffer_prototype
 from zarr.core.sync import sync
 
+from ._native import load_library
+from .codec import META_ATTR, meta_size
+
 
 class _Native:
     def __init__(self) -> None:
-        path = Path(__file__).with_name("core.so")
-        if not path.exists():
-            raise FileNotFoundError(f"could not find {path}; compile core.so first")
-
-        self.lib = ctypes.CDLL(str(path))
+        self.lib = load_library()
 
         self.lib.szfp_layout.argtypes = [
             ctypes.c_size_t,
