@@ -1,5 +1,6 @@
 import json
 
+import numpy as np
 import pytest
 import zarr
 from helpers import SHAPE, make_array, smooth_field
@@ -76,3 +77,32 @@ def test_rejects_float64(tmp_path):
 def test_rejects_chunk_not_multiple_of_block(tmp_path):
     with pytest.raises(ValueError, match="divisible by block_dim"):
         _create(tmp_path / "a", chunks=(62, 16, 32), shape=(62, 16, 32))
+
+
+@pytest.mark.parametrize("n", (70, 72))
+def test_rejects_shape_not_multiple_of_chunk(tmp_path, n):
+    with pytest.raises(ValueError, match="partial edge chunks"):
+        _create(tmp_path / "a", shape=(n, 16, 32))
+
+
+def test_rejects_chunk_not_multiple_of_sub_chunk(tmp_path):
+    g = zarr.open_group(str(tmp_path / "a"), mode="w")
+    with pytest.raises(ValueError, match="not divisible by sub_chunk"):
+        g.create_array(
+            "data",
+            shape=SHAPE,
+            chunks=SHAPE,
+            dtype="float32",
+            serializer=SkipZFPCodec(rate=8.0, sub_chunk=(48, 16, 32)),
+            compressors=None,
+            filters=None,
+        )
+
+
+@pytest.mark.parametrize("bad", (np.nan, np.inf, -np.inf))
+def test_rejects_non_finite_values(tmp_path, bad):
+    z = _create(tmp_path / "a")
+    a = smooth_field()
+    a[3, 4, 5] = bad
+    with pytest.raises(ValueError, match="NaN or infinite"):
+        z[:] = a

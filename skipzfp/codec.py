@@ -291,8 +291,6 @@ class SkipZFPCodec(ArrayBytesCodec):
         }
 
     def validate(self, *, shape: tuple[int, ...], dtype: Any, chunk_grid: Any) -> None:
-        del chunk_grid
-
         dt = np.dtype(dtype.to_native_dtype())
         if dt != np.dtype("float32"):
             raise TypeError("SkipZFP currently only supports float32")
@@ -300,9 +298,23 @@ class SkipZFPCodec(ArrayBytesCodec):
         if len(shape) != 3:
             raise ValueError("SkipZFP currently only supports 3D arrays")
 
-    def evolve_from_array_spec(self, array_spec: ArraySpec) -> Self:
-        self.chunk_shape(array_spec)
-        return self
+        chunk = tuple(int(c) for c in getattr(chunk_grid, "chunk_shape", ()))
+        if len(chunk) != 3:
+            return
+        if any(c % self.block_dim for c in chunk):
+            raise ValueError(
+                f"chunk shape {chunk}: each dimension must be divisible by "
+                f"block_dim={self.block_dim}"
+            )
+        if any(c % u for c, u in zip(chunk, self.unit(chunk))):
+            raise ValueError(
+                f"chunk {chunk} is not divisible by sub_chunk {self.sub_chunk}"
+            )
+        if any(s % c for s, c in zip(shape, chunk)):
+            raise ValueError(
+                f"array shape {tuple(shape)} must be a whole multiple of the chunk "
+                f"shape {chunk}; partial edge chunks are not supported"
+            )
 
     def chunk_shape(self, spec: ArraySpec) -> tuple[int, int, int]:
         shape = tuple(int(x) for x in spec.shape)
@@ -346,6 +358,8 @@ class SkipZFPCodec(ArrayBytesCodec):
             chunk_data.as_ndarray_like(),
             dtype=np.float32,
         ).reshape(shape)
+        if not np.isfinite(arr).all():
+            raise ValueError("SkipZFP cannot encode NaN or infinite values")
 
         out = await asyncio.to_thread(self.pack, arr)
         return chunk_spec.prototype.buffer.from_array_like(out)
