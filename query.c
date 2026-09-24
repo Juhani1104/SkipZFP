@@ -505,7 +505,6 @@ int szfp_count_offsets(
         }
     }
 
-    /* 整個 buffer 只開一次 stream，每個 block 用 rseek 跳過去再用低階 API 解碼，省掉逐 block 的配置 */
     {
         bitstream* stream = stream_open((void*)buf, buf_size);
         zfp_stream* zfp;

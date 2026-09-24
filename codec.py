@@ -248,7 +248,6 @@ class SkipZFPCodec(ArrayBytesCodec):
         object.__setattr__(self, "sub_chunk", sub_chunk)
 
     def unit(self, shape: tuple[int, ...]) -> tuple[int, ...]:
-        """metadata 與 payload 排列的單位：sub_chunk，沒設定就是整個 chunk。"""
         return self.sub_chunk or tuple(shape)
 
     @property
@@ -365,7 +364,6 @@ class SkipZFPCodec(ArrayBytesCodec):
         return chunk_spec.prototype.nd_buffer.from_ndarray_like(out)
 
     def pack(self, arr: np.ndarray) -> np.ndarray:
-        """壓縮一個 chunk：逐個 sub_chunk 壓縮 → 套 block 順序 → 依 sub_chunk 串接 → 依層排放。"""
         shape = tuple(arr.shape)
         if self.plain(shape):
             return native().encode(arr, self.rate, self.block_dim)
@@ -399,13 +397,11 @@ class SkipZFPCodec(ArrayBytesCodec):
 
 
 def unit_slices(shape: tuple[int, ...], unit: tuple[int, ...]) -> list[tuple[slice, ...]]:
-    """chunk 內各 sub_chunk 的切片，C-order。"""
     grid = tuple(s // u for s, u in zip(shape, unit))
     return [tuple(slice(i * u, (i + 1) * u) for i, u in zip(idx, unit)) for idx in np.ndindex(*grid)]
 
 
 def block_rank(shape: tuple[int, ...], order: tuple[int, ...], block_dim: int = 4) -> np.ndarray:
-    """每個 block（ZFP 原生的 C-order 編號）在 chunk 內的擺放位置；order 最後一個軸變化最快。"""
     blocks = tuple(s // block_dim for s in shape)
     coords = np.indices(blocks).reshape(len(blocks), -1)
     return np.ravel_multi_index(tuple(coords[a] for a in order), tuple(blocks[a] for a in order))

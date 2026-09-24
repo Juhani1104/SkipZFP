@@ -548,18 +548,12 @@ async def read_meta(arr: zarr.Array, lt: _Layout) -> tuple[np.ndarray, int, int]
 
 
 def unit_to_chunk(lt: _Layout, unit_ids: np.ndarray, ranks: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """sub_chunk 編號 + sub_chunk 內的 block 位置 → Zarr chunk 編號 + chunk 內的 block 位置。
-
-    輸入要跟 plan 的輸出一樣：依 unit 遞增、同一 unit 內 rank 遞增。輸出依 (chunk, block) 排好。
-    """
     subs = tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape))
     n_unit = int(np.prod(lt.unit_grid))
-    # 先對每個 unit 查表（unit 數遠少於 block 數），再用 gather 展開到 block
     u = np.unravel_index(np.arange(n_unit), lt.unit_grid)
     u_chunk = np.ravel_multi_index(tuple(x // s for x, s in zip(u, subs)), lt.grid_shape)
     u_sub = np.ravel_multi_index(tuple(x % s for x, s in zip(u, subs)), subs)
 
-    # 同一 chunk 的 unit 依 sub_idx 排；每個 unit 的 block 在輸入中連續，整段搬過去就不用對 block 排序
     counts = np.bincount(unit_ids, minlength=n_unit)
     starts = np.cumsum(counts) - counts
     u_order = np.lexsort((u_sub, u_chunk))
@@ -572,7 +566,6 @@ def unit_to_chunk(lt: _Layout, unit_ids: np.ndarray, ranks: np.ndarray) -> tuple
 
 
 def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
-    """把新格式（每層一個 eps）轉成 planner 用的 (cmin, cmax, 該層 eps, offsets)。"""
     m = meta.reshape(-1, lt.meta_size)
     n_layer = len(lt.layers)
     eps = m[:, 8 + 4 * layer : 12 + 4 * layer]
@@ -589,7 +582,6 @@ async def stream_count(
     threshold: float,
     concurrency: int,
 ) -> tuple[int, int, float]:
-    """每個 range 一下載完就交給 C 原地解碼計數，讓解碼跟下載重疊。"""
     loop = asyncio.get_running_loop()
     sem = asyncio.Semaphore(concurrency)
 
@@ -731,7 +723,6 @@ async def query_gt_async(
     sorted_chunks = chunk_ids[np.lexsort((block_ids, chunk_ids))] if layer > 0 else None
     cols = np.cumsum((0, *lt.layer_bytes[: layer + 1]))
 
-    # 分層時，逐層讀會在同一個 chunk 發多個 request；超過門檻就改讀 chunk 開頭的連續一段
     dense: set[str] = set()
     if layer > 0:
         per_key = collections.Counter(req.key for merged, _ in per_layer for req in merged)
