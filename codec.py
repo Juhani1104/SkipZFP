@@ -220,12 +220,35 @@ class SkipZFPCodec(ArrayBytesCodec):
 
     rate: float = 8.0
     block_dim: int = 4
+    layers: tuple[float, ...] = ()
+    block_order: tuple[int, ...] = (0, 1, 2)
 
     def __post_init__(self) -> None:
         if self.rate <= 0:
             raise ValueError("rate must be greater than 0")
         if self.block_dim != 4:
             raise ValueError("SkipZFP currently requires block_dim=4")
+
+        layers = tuple(float(r) for r in self.layers) or (float(self.rate),)
+        if list(layers) != sorted(set(layers)) or layers[-1] != self.rate:
+            raise ValueError("layers must be increasing and end at rate")
+        if any(r <= 0 or (8 * r) % 1 for r in layers):
+            raise ValueError("each layer rate must be a positive multiple of 0.125")
+        object.__setattr__(self, "layers", layers)
+
+        order = tuple(int(a) for a in self.block_order)
+        if sorted(order) != [0, 1, 2]:
+            raise ValueError("block_order must be a permutation of (0, 1, 2)")
+        object.__setattr__(self, "block_order", order)
+
+    @property
+    def layer_bytes(self) -> tuple[int, ...]:
+        prev = (0.0, *self.layers[:-1])
+        return tuple(int(8 * (r - p)) for r, p in zip(self.layers, prev))
+
+    @property
+    def plain(self) -> bool:
+        return len(self.layers) == 1 and self.block_order == (0, 1, 2)
 
     @classmethod
     def from_dict(cls, data: dict[str, JSON]) -> Self:
@@ -239,6 +262,8 @@ class SkipZFPCodec(ArrayBytesCodec):
         return cls(
             rate=float(cfg.get("rate", 8.0)),
             block_dim=int(cfg.get("block_dim", 4)),
+            layers=tuple(cfg.get("layers") or ()),
+            block_order=tuple(cfg.get("block_order") or (0, 1, 2)),
         )
 
     def to_dict(self) -> dict[str, JSON]:
@@ -247,6 +272,8 @@ class SkipZFPCodec(ArrayBytesCodec):
             "configuration": {
                 "rate": self.rate,
                 "block_dim": self.block_dim,
+                "layers": list(self.layers),
+                "block_order": list(self.block_order),
             },
         }
 
@@ -308,6 +335,8 @@ class SkipZFPCodec(ArrayBytesCodec):
             self.rate,
             self.block_dim,
         )
+        if not self.plain:
+            out = self.to_layers(out, shape)
         return chunk_spec.prototype.buffer.from_array_like(out)
 
     async def _decode_single(
@@ -321,6 +350,9 @@ class SkipZFPCodec(ArrayBytesCodec):
             dtype=np.uint8,
         ).reshape(-1)
 
+        if not self.plain:
+            buf = self.from_layers(buf, shape)
+
         out = await asyncio.to_thread(
             native().decode,
             buf,
@@ -329,6 +361,33 @@ class SkipZFPCodec(ArrayBytesCodec):
             self.block_dim,
         )
         return chunk_spec.prototype.nd_buffer.from_ndarray_like(out)
+
+    def to_layers(self, buf: np.ndarray, shape: tuple[int, int, int]) -> np.ndarray:
+        rows = buf.reshape(-1, sum(self.layer_bytes))
+        ranked = np.empty_like(rows)
+        ranked[block_rank(shape, self.block_order, self.block_dim)] = rows
+        cuts = np.cumsum((0, *self.layer_bytes))
+        return np.concatenate([ranked[:, a:b].reshape(-1) for a, b in zip(cuts[:-1], cuts[1:])])
+
+    def from_layers(self, buf: np.ndarray, shape: tuple[int, int, int]) -> np.ndarray:
+        n = int(np.prod([s // self.block_dim for s in shape]))
+        cuts = np.cumsum((0, *(n * b for b in self.layer_bytes)))
+        ranked = np.concatenate(
+            [buf[a:b].reshape(n, -1) for a, b in zip(cuts[:-1], cuts[1:])], axis=1
+        )
+        return np.ascontiguousarray(ranked[block_rank(shape, self.block_order, self.block_dim)]).reshape(-1)
+
+
+def block_rank(shape: tuple[int, ...], order: tuple[int, ...], block_dim: int = 4) -> np.ndarray:
+    """每個 block（ZFP 原生的 C-order 編號）在 chunk 內的擺放位置；order 最後一個軸變化最快。"""
+    blocks = tuple(s // block_dim for s in shape)
+    coords = np.indices(blocks).reshape(len(blocks), -1)
+    return np.ravel_multi_index(tuple(coords[a] for a in order), tuple(blocks[a] for a in order))
+
+
+def meta_size(codec: SkipZFPCodec, chunk: tuple[int, ...]) -> int:
+    n = int(np.prod([s // codec.block_dim for s in chunk]))
+    return 8 + 4 * len(codec.layers) + 2 * n
 
 
 META_ATTR = "skipzfp_meta"
@@ -360,14 +419,15 @@ def write_meta(
     if not arr.path:
         raise ValueError("the array must live inside a group so metadata can sit next to it")
 
-    _, meta_size = native().layout(chunk, codec.rate, codec.block_dim)
+    size = meta_size(codec, chunk)
+    rank = block_rank(chunk, codec.block_order, codec.block_dim)
     path = path or f"{arr.path}_meta"
 
     meta = zarr.create_array(
         store=arr.store_path.store,
         name=path,
-        shape=(*grid, meta_size),
-        chunks=(min(t_chunk, grid[0]), *grid[1:], meta_size),
+        shape=(*grid, size),
+        chunks=(min(t_chunk, grid[0]), *grid[1:], size),
         dtype="uint8",
         compressors=None,
         filters=None,
@@ -376,12 +436,16 @@ def write_meta(
 
     def one(idx: tuple[int, ...]) -> np.ndarray:
         sl = tuple(slice(i * c, (i + 1) * c) for i, c in zip(idx, chunk))
-        return native().meta(data[sl], codec.rate, codec.block_dim)
+        per = [native().meta(data[sl], r, codec.block_dim) for r in codec.layers]
+        offs = per[-1][12:].reshape(-1, 2)
+        ranked = np.empty_like(offs)
+        ranked[rank] = offs
+        return np.concatenate([per[-1][:8], *(m[8:12] for m in per), ranked.reshape(-1)])
 
     idxs = list(np.ndindex(*grid))
     with ThreadPoolExecutor(threads) as ex:
         rows = list(ex.map(one, idxs))
 
-    meta[...] = np.stack(rows).reshape(*grid, meta_size)
+    meta[...] = np.stack(rows).reshape(*grid, size)
     arr.update_attributes({META_ATTR: path})
     return meta

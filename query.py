@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import ctypes
 import itertools
 import time
@@ -12,7 +13,7 @@ from typing import Any
 
 import numpy as np
 import zarr
-from codec import META_ATTR
+from codec import META_ATTR, meta_size
 from zarr.abc.store import RangeByteRequest
 from zarr.core.buffer import default_buffer_prototype
 from zarr.core.sync import sync
@@ -215,6 +216,9 @@ class _Layout:
     block_size: int
     blocks_per_chunk: int
     values_per_block: int
+    layers: tuple[float, ...]
+    layer_bytes: tuple[int, ...]
+    layer_starts: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -320,7 +324,7 @@ def get_layout(arr: zarr.Array) -> _Layout:
     blocks_per_chunk = int(np.prod(blocks_axis))
     values_per_block = block_dim**3
 
-    data_size, meta_size = native().layout(
+    data_size, _ = native().layout(
         chunk_shape,
         rate,
         block_dim,
@@ -328,7 +332,7 @@ def get_layout(arr: zarr.Array) -> _Layout:
 
     if blocks_per_chunk <= 0:
         raise ValueError("invalid block layout")
-    if data_size <= 0 or meta_size <= 0:
+    if data_size <= 0:
         raise ValueError("invalid fixed-rate layout")
     if data_size % blocks_per_chunk != 0:
         raise ValueError("compressed payload is not divisible by blocks")
@@ -341,10 +345,15 @@ def get_layout(arr: zarr.Array) -> _Layout:
         rate=rate,
         block_dim=block_dim,
         data_size=data_size,
-        meta_size=meta_size,
+        meta_size=meta_size(codec, chunk_shape),
         block_size=block_size,
         blocks_per_chunk=blocks_per_chunk,
         values_per_block=values_per_block,
+        layers=codec.layers,
+        layer_bytes=codec.layer_bytes,
+        layer_starts=tuple(
+            int(x) for x in np.cumsum((0, *codec.layer_bytes[:-1])) * blocks_per_chunk
+        ),
     )
 
 
@@ -434,12 +443,21 @@ async def read_meta(arr: zarr.Array, lt: _Layout) -> tuple[np.ndarray, int, int]
     return data, data.nbytes, n_obj
 
 
+def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
+    """把新格式（每層一個 eps）轉成 planner 用的 (cmin, cmax, 該層 eps, offsets)。"""
+    m = meta.reshape(-1, lt.meta_size)
+    n_layer = len(lt.layers)
+    eps = m[:, 8 + 4 * layer : 12 + 4 * layer]
+    return np.ascontiguousarray(np.concatenate([m[:, :8], eps, m[:, 8 + 4 * n_layer :]], axis=1))
+
+
 def merge_ranges(
     keys: Sequence[str],
     chunk_ids: np.ndarray,
     block_ids: np.ndarray,
     block_size: int,
     merge_gap_blocks: int,
+    base: int = 0,
 ) -> tuple[list[_MergedRange], np.ndarray]:
     if merge_gap_blocks < 0:
         raise ValueError("merge_gap_blocks must be non-negative")
@@ -471,8 +489,8 @@ def merge_ranges(
         out.append(
             _MergedRange(
                 key=keys[chunk],
-                start=first * block_size,
-                end=(last + 1) * block_size,
+                start=base + first * block_size,
+                end=base + (last + 1) * block_size,
                 first_block=first,
                 item_start=item_start,
                 item_end=i,
@@ -487,8 +505,8 @@ def merge_ranges(
     out.append(
         _MergedRange(
             key=keys[chunk],
-            start=first * block_size,
-            end=(last + 1) * block_size,
+            start=base + first * block_size,
+            end=base + (last + 1) * block_size,
             first_block=first,
             item_start=item_start,
             item_end=n,
@@ -535,6 +553,8 @@ async def query_gt_async(
     request_concurrency: int = 32,
     request_batch_size: int | None = None,
     merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
 ) -> QueryResult:
     if not isinstance(arr, zarr.Array):
         raise TypeError("query_gt_async expects an opened zarr.Array")
@@ -545,6 +565,11 @@ async def query_gt_async(
     t0 = time.perf_counter()
 
     lt = get_layout(arr)
+    layer = len(lt.layers) - 1 if layer is None else layer
+    if not 0 <= layer < len(lt.layers):
+        raise ValueError(f"layer must be in [0, {len(lt.layers) - 1}]")
+    rate = lt.layers[layer]
+    block_size = int(8 * rate)
     coords = chunk_coords(lt.grid_shape)
     keys = [full_key(arr, arr.metadata.encode_chunk_key(coord)) for coord in coords]
     store = arr.store_path.store
@@ -556,31 +581,42 @@ async def query_gt_async(
     t1 = time.perf_counter()
     chunk_ids, block_ids, n_in, n_out = await asyncio.to_thread(
         native().plan,
-        meta,
+        plan_meta(meta, lt, layer),
         len(keys),
-        lt.meta_size,
+        lt.meta_size - 4 * (len(lt.layers) - 1),
         lt.blocks_per_chunk,
         float(threshold),
         threads,
     )
     plan_sec = time.perf_counter() - t1
 
-    merged, sorted_blocks = merge_ranges(
-        keys,
-        chunk_ids,
-        block_ids,
-        lt.block_size,
-        merge_gap_blocks,
-    )
-
-    payload_reqs = [
-        _Range(
-            key=req.key,
-            start=req.start,
-            end=req.end,
-        )
-        for req in merged
+    per_layer = [
+        merge_ranges(keys, chunk_ids, block_ids, lt.layer_bytes[j], merge_gap_blocks, lt.layer_starts[j])
+        for j in range(layer + 1)
     ]
+    sorted_blocks = per_layer[0][1]
+    order = np.lexsort((block_ids, chunk_ids))
+    sorted_chunks = chunk_ids[order]
+    cols = np.cumsum((0, *lt.layer_bytes[: layer + 1]))
+
+    # 分層時，逐層讀會在同一個 chunk 發多個 request；超過門檻就改讀 chunk 開頭的連續一段
+    dense: set[str] = set()
+    if layer > 0:
+        per_key = collections.Counter(req.key for merged, _ in per_layer for req in merged)
+        dense = {k for k, n in per_key.items() if n > max_chunk_requests}
+    prefix_end = int(cols[-1]) * lt.blocks_per_chunk
+
+    payload_reqs = []
+    fills = []
+    for j, (merged, _) in enumerate(per_layer):
+        for req in merged:
+            if req.key not in dense:
+                payload_reqs.append(_Range(key=req.key, start=req.start, end=req.end))
+                fills.append((j, req))
+    chunk_of = {k: c for c, k in enumerate(keys)}
+    for k in sorted(dense):
+        payload_reqs.append(_Range(key=k, start=0, end=prefix_end))
+        fills.append((None, k))
 
     t1 = time.perf_counter()
     payload_parts = await read_ranges(
@@ -591,20 +627,30 @@ async def query_gt_async(
     )
     payload_read_sec = time.perf_counter() - t1
 
-    blocks = extract_blocks(
-        payload_parts,
-        merged,
-        sorted_blocks,
-        lt.block_size,
-    )
+    out = np.empty((len(sorted_blocks), int(cols[-1])), dtype=np.uint8)
+    for data, (j, item) in zip(payload_parts, fills):
+        buf = np.frombuffer(data, dtype=np.uint8)
+        if j is not None:
+            rows = sorted_blocks[item.item_start : item.item_end].astype(np.int64) - item.first_block
+            out[item.item_start : item.item_end, cols[j] : cols[j + 1]] = (
+                buf.reshape(-1, lt.layer_bytes[j])[rows]
+            )
+        else:
+            c = chunk_of[item]
+            lo, hi = np.searchsorted(sorted_chunks, [c, c + 1])
+            ids = sorted_blocks[lo:hi].astype(np.int64)
+            for jj in range(layer + 1):
+                seg = buf[lt.layer_starts[jj] : lt.layer_starts[jj] + lt.blocks_per_chunk * lt.layer_bytes[jj]]
+                out[lo:hi, cols[jj] : cols[jj + 1]] = seg.reshape(-1, lt.layer_bytes[jj])[ids]
+    blocks = out.reshape(-1)
 
     t1 = time.perf_counter()
     n_maybe_val = await asyncio.to_thread(
         native().count,
         blocks,
         len(sorted_blocks),
-        lt.block_size,
-        lt.rate,
+        block_size,
+        rate,
         lt.block_dim,
         float(threshold),
         threads,
@@ -614,7 +660,7 @@ async def query_gt_async(
     total_blocks = len(keys) * lt.blocks_per_chunk
     total_count = n_in * lt.values_per_block + n_maybe_val
     payload_bytes = sum(len(x) for x in payload_parts)
-    useful_bytes = len(sorted_blocks) * lt.block_size
+    useful_bytes = len(sorted_blocks) * block_size
 
     return QueryResult(
         count=total_count,
@@ -646,6 +692,8 @@ def query_gt(
     request_concurrency: int = 32,
     request_batch_size: int | None = None,
     merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
 ) -> QueryResult:
     arr = open_skipzfp(
         source,
@@ -661,5 +709,7 @@ def query_gt(
             request_concurrency=request_concurrency,
             request_batch_size=request_batch_size,
             merge_gap_blocks=merge_gap_blocks,
+            layer=layer,
+            max_chunk_requests=max_chunk_requests,
         )
     )
