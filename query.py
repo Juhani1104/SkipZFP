@@ -548,13 +548,27 @@ async def read_meta(arr: zarr.Array, lt: _Layout) -> tuple[np.ndarray, int, int]
 
 
 def unit_to_chunk(lt: _Layout, unit_ids: np.ndarray, ranks: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """sub_chunk 編號 + sub_chunk 內的 block 位置 → Zarr chunk 編號 + chunk 內的 block 位置。"""
+    """sub_chunk 編號 + sub_chunk 內的 block 位置 → Zarr chunk 編號 + chunk 內的 block 位置。
+
+    輸入要跟 plan 的輸出一樣：依 unit 遞增、同一 unit 內 rank 遞增。輸出依 (chunk, block) 排好。
+    """
     subs = tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape))
-    u = np.unravel_index(unit_ids.astype(np.int64), lt.unit_grid)
-    chunk = np.ravel_multi_index(tuple(x // s for x, s in zip(u, subs)), lt.grid_shape)
-    sub_idx = np.ravel_multi_index(tuple(x % s for x, s in zip(u, subs)), subs)
-    blocks = sub_idx * lt.blocks_per_unit + ranks.astype(np.int64)
-    return chunk.astype(np.uint32), blocks.astype(np.uint32)
+    n_unit = int(np.prod(lt.unit_grid))
+    # 先對每個 unit 查表（unit 數遠少於 block 數），再用 gather 展開到 block
+    u = np.unravel_index(np.arange(n_unit), lt.unit_grid)
+    u_chunk = np.ravel_multi_index(tuple(x // s for x, s in zip(u, subs)), lt.grid_shape)
+    u_sub = np.ravel_multi_index(tuple(x % s for x, s in zip(u, subs)), subs)
+
+    # 同一 chunk 的 unit 依 sub_idx 排；每個 unit 的 block 在輸入中連續，整段搬過去就不用對 block 排序
+    counts = np.bincount(unit_ids, minlength=n_unit)
+    starts = np.cumsum(counts) - counts
+    u_order = np.lexsort((u_sub, u_chunk))
+    seg = counts[u_order]
+    perm = np.repeat(starts[u_order] - (np.cumsum(seg) - seg), seg) + np.arange(len(unit_ids))
+
+    uid = unit_ids[perm]
+    blocks = u_sub[uid] * lt.blocks_per_unit + ranks[perm].astype(np.int64)
+    return u_chunk[uid].astype(np.uint32), blocks.astype(np.uint32)
 
 
 def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
@@ -609,9 +623,13 @@ def merge_ranges(
     if n == 0:
         return [], np.empty(0, dtype=np.uint32)
 
-    order = np.lexsort((block_ids, chunk_ids))
-    chunks = chunk_ids[order]
-    blocks = block_ids[order]
+    key = (chunk_ids.astype(np.uint64) << np.uint64(32)) | block_ids.astype(np.uint64)
+    if np.all(key[1:] > key[:-1]):
+        chunks, blocks = chunk_ids, block_ids
+    else:
+        order = np.lexsort((block_ids, chunk_ids))
+        chunks = chunk_ids[order]
+        blocks = block_ids[order]
 
     out_chunk, out_first, out_last, out_item = native().merge(chunks, blocks, merge_gap_blocks)
     item_end = np.r_[out_item[1:], n]
@@ -710,8 +728,7 @@ async def query_gt_async(
         for j in range(layer + 1)
     ]
     sorted_blocks = per_layer[0][1]
-    order = np.lexsort((block_ids, chunk_ids))
-    sorted_chunks = chunk_ids[order]
+    sorted_chunks = chunk_ids[np.lexsort((block_ids, chunk_ids))] if layer > 0 else None
     cols = np.cumsum((0, *lt.layer_bytes[: layer + 1]))
 
     # 分層時，逐層讀會在同一個 chunk 發多個 request；超過門檻就改讀 chunk 開頭的連續一段

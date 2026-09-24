@@ -1,6 +1,7 @@
 #include <zfp.h>
 
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -494,18 +495,44 @@ int szfp_count_offsets(
         return SZFP_ERR_SIZE;
     }
 
+    if (block_dim != 4) {
+        return SZFP_ERR_ARG;
+    }
+
     for (size_t i = 0; i < n; i++) {
         if (offsets[i] > buf_size || buf_size - offsets[i] < block_nbytes) {
             return SZFP_ERR_SIZE;
         }
+    }
 
-        if (decode_block(buf + offsets[i], block_nbytes, rate, block_dim, vals) != SZFP_OK) {
+    /* 整個 buffer 只開一次 stream，每個 block 用 rseek 跳過去再用低階 API 解碼，省掉逐 block 的配置 */
+    {
+        bitstream* stream = stream_open((void*)buf, buf_size);
+        zfp_stream* zfp;
+
+        if (stream == NULL) {
             return SZFP_ERR_ZFP;
         }
 
-        for (size_t k = 0; k < nval; k++) {
-            count += (double)vals[k] > threshold;
+        zfp = zfp_stream_open(stream);
+        if (zfp == NULL) {
+            stream_close(stream);
+            return SZFP_ERR_ZFP;
         }
+
+        zfp_stream_set_rate(zfp, rate, zfp_type_float, 3, 0);
+
+        for (size_t i = 0; i < n; i++) {
+            stream_rseek(stream, (bitstream_offset)offsets[i] * CHAR_BIT);
+            zfp_decode_block_float_3(zfp, vals);
+
+            for (size_t k = 0; k < nval; k++) {
+                count += (double)vals[k] > threshold;
+            }
+        }
+
+        zfp_stream_close(zfp);
+        stream_close(stream);
     }
 
     *out_count = count;
