@@ -1,4 +1,3 @@
-.clang-format
 .vscode/
 *.so
 build/
