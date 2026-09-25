@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import zfpy
 
-from skipzfp import codec
+from skipzfp import codec, query
 
 from helpers import RATES, SHAPE, decode_one_block, smooth_field, split, true_blocks
 
@@ -38,3 +38,14 @@ def test_constant_chunk():
     buf, cmin, cmax, eps, offs = split(a, 8.0)
     assert cmin == cmax == 3.5 and not offs.any()
     assert np.array_equal(codec.native().decode(buf, SHAPE, 8.0, 4), a)
+
+
+@pytest.mark.parametrize("native", (codec.native, query.native))
+def test_native_errors_become_exceptions(native):
+    with pytest.raises(RuntimeError, match="szfp_layout failed"):
+        native().layout(SHAPE, 0.0, 4)
+
+
+def test_encode_rejects_non_3d():
+    with pytest.raises(ValueError, match="3D"):
+        codec.native().encode(np.zeros((4, 4), np.float32), 8.0, 4)

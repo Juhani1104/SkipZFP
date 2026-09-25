@@ -158,3 +158,251 @@ def test_native_rejects_bad_input(lib, encoded, case):
     assert rc != OK
     if want:
         assert rc == want[0]
+
+
+HUGE = 1 << 22  # three of these multiply past SIZE_MAX
+
+
+def edge_cases(buf, a):
+    f = np.empty(a.size, np.float32)
+    meta = np.zeros(4096, np.uint8)
+    ids = np.array([3, 1], np.uint32)
+    zeros = np.zeros(2, np.uint32)
+    u64 = np.zeros(2, np.uint64)
+    out_ids = np.zeros(2, np.uint32)
+    KEEP[:] = [f, meta, ids, zeros, u64, out_ids]
+    x, y, z = SHAPE
+    nan, inf = float("nan"), float("inf")
+    return {
+        "layout nan rate": ("szfp_layout", (x, y, z, nan, 4, _out(), _out())),
+        "layout inf rate": ("szfp_layout", (x, y, z, inf, 4, _out(), _out())),
+        "layout zero dim": ("szfp_layout", (0, y, z, RATE, 4, _out(), _out())),
+        "layout overflow": (
+            "szfp_layout",
+            (HUGE, HUGE, HUGE, RATE, 4, _out(), _out()),
+        ),
+        "layout empty payload": ("szfp_layout", (4, 4, 4, 0.1, 4, _out(), _out())),
+        "encode bad rate": (
+            "szfp_encode",
+            (ptr(a), x, y, z, 0.0, 4, ptr(f), f.size * 4, _out()),
+        ),
+        "encode ragged": (
+            "szfp_encode",
+            (ptr(a), x, y, 30, RATE, 4, ptr(f), f.size * 4, _out()),
+        ),
+        "decode overflow": (
+            "szfp_decode",
+            (ptr(buf), buf.size, HUGE, HUGE, HUGE, RATE, 4, ptr(f), f.size),
+        ),
+        "decode bad rate": (
+            "szfp_decode",
+            (ptr(buf), buf.size, x, y, z, 0.0, 4, ptr(f), f.size),
+        ),
+        "decode bad block_dim": (
+            "szfp_decode",
+            (ptr(buf), buf.size, x, y, z, RATE, 0, ptr(f), f.size),
+        ),
+        "decode ragged": (
+            "szfp_decode",
+            (ptr(buf), buf.size, x, y, 30, RATE, 4, ptr(f), f.size),
+        ),
+        "decode empty payload": (
+            "szfp_decode",
+            (ptr(buf), buf.size, 4, 4, 4, 0.1, 4, ptr(f), f.size),
+        ),
+        "meta bad rate": ("szfp_meta", (ptr(a), x, y, z, 0.0, 4, ptr(meta), meta.size)),
+        "meta ragged": ("szfp_meta", (ptr(a), x, y, 30, RATE, 4, ptr(meta), meta.size)),
+        "decode_block bad rate": (
+            "szfp_decode_block",
+            (ptr(buf), NB, 0.0, 3, 3, ptr(f)),
+        ),
+        "decode_block bad dims": (
+            "szfp_decode_block",
+            (ptr(buf), NB, RATE, 3, 5, ptr(f)),
+        ),
+        "plan zero chunks": (
+            "szfp_plan_gt",
+            (
+                ptr(meta),
+                0,
+                1036,
+                512,
+                0.0,
+                1,
+                ptr(u64),
+                ptr(u64),
+                0,
+                _out(),
+                _out(),
+                _out(),
+            ),
+        ),
+        "plan small cap": (
+            "szfp_plan_gt",
+            (
+                ptr(meta),
+                1,
+                1036,
+                512,
+                0.0,
+                1,
+                ptr(u64),
+                ptr(u64),
+                1,
+                _out(),
+                _out(),
+                _out(),
+            ),
+        ),
+        "plan wrong meta size": (
+            "szfp_plan_gt",
+            (
+                ptr(meta),
+                1,
+                1000,
+                512,
+                0.0,
+                1,
+                ptr(f),
+                ptr(f),
+                512,
+                _out(),
+                _out(),
+                _out(),
+            ),
+        ),
+        "count_gt bad rate": (
+            "szfp_count_gt_blocks",
+            (ptr(buf), 1, NB, 0.0, 4, 0.0, 1, _out()),
+        ),
+        "count_gt wrong size": (
+            "szfp_count_gt_blocks",
+            (ptr(buf), 1, NB - 1, RATE, 4, 0.0, 1, _out()),
+        ),
+        "count_gt null out": (
+            "szfp_count_gt_blocks",
+            (ptr(buf), 1, NB, RATE, 4, 0.0, 1, None),
+        ),
+        "decode_blocks bad rate": (
+            "szfp_decode_blocks",
+            (ptr(buf), 1, NB, 0.0, 4, 1, ptr(f)),
+        ),
+        "decode_blocks wrong size": (
+            "szfp_decode_blocks",
+            (ptr(buf), 1, NB - 1, RATE, 4, 1, ptr(f)),
+        ),
+        "merge unsorted": (
+            "szfp_merge_ranges",
+            (
+                ptr(zeros),
+                ptr(ids),
+                2,
+                0,
+                ptr(out_ids),
+                ptr(u64),
+                ptr(u64),
+                ptr(u64),
+                _out(),
+            ),
+        ),
+        "merge null out_n": (
+            "szfp_merge_ranges",
+            (
+                ptr(zeros),
+                ptr(ids),
+                2,
+                0,
+                ptr(out_ids),
+                ptr(u64),
+                ptr(u64),
+                ptr(u64),
+                None,
+            ),
+        ),
+        "count_offsets null out": (
+            "szfp_count_offsets",
+            (ptr(buf), buf.size, ptr(u64), 1, NB, RATE, 4, 0.0, None),
+        ),
+        "count_offsets bad rate": (
+            "szfp_count_offsets",
+            (ptr(buf), buf.size, ptr(u64), 1, NB, 0.0, 4, 0.0, _out()),
+        ),
+        "count_offsets wrong size": (
+            "szfp_count_offsets",
+            (ptr(buf), buf.size, ptr(u64), 1, NB - 1, RATE, 4, 0.0, _out()),
+        ),
+        "count_offsets block_dim 2": (
+            "szfp_count_offsets",
+            (ptr(buf), buf.size, ptr(u64), 1, 8, RATE, 2, 0.0, _out()),
+        ),
+        "count_offsets tiny rate": (
+            "szfp_count_offsets",
+            (ptr(buf), buf.size, ptr(u64), 1, NB, 0.1, 4, 0.0, _out()),
+        ),
+        "count_offsets huge block_dim": (
+            "szfp_count_offsets",
+            (ptr(buf), buf.size, ptr(u64), 1, NB, RATE, HUGE, 0.0, _out()),
+        ),
+        "count_gt null blocks": (
+            "szfp_count_gt_blocks",
+            (None, 1, NB, RATE, 4, 0.0, 1, _out()),
+        ),
+        "encode bad block_dim": (
+            "szfp_encode",
+            (ptr(a), x, y, z, RATE, 3, ptr(f), f.size * 4, _out()),
+        ),
+        "encode overflow": (
+            "szfp_encode",
+            (ptr(a), HUGE, HUGE, HUGE, RATE, 4, ptr(f), f.size * 4, _out()),
+        ),
+        "encode empty payload": (
+            "szfp_encode",
+            (ptr(a), 4, 4, 4, 0.1, 4, ptr(f), f.size * 4, _out()),
+        ),
+        "encode rate not multiple of 1/8": (
+            "szfp_encode",
+            (ptr(a), x, y, z, 8.01, 4, ptr(f), f.size * 4, _out()),
+        ),
+    }
+
+
+EDGE = list(edge_cases(np.zeros(1, np.uint8), np.zeros(SHAPE, np.float32)))
+
+
+@pytest.mark.parametrize("case", EDGE)
+def test_native_rejects_edge_input(lib, encoded, case):
+    a, buf, _ = encoded
+    name, args = edge_cases(buf, a)[case]
+    assert getattr(lib, name)(*args) != OK
+
+
+@pytest.mark.parametrize(
+    "name, args",
+    [
+        ("szfp_count_gt_blocks", (None, 0, NB, RATE, 4, 0.0, 1, _out())),
+        ("szfp_merge_ranges", (None, None, 0, 0, None, None, None, None, _out())),
+        ("szfp_count_offsets", (None, 0, None, 0, NB, RATE, 4, 0.0, _out())),
+    ],
+)
+def test_native_empty_input_is_ok(lib, name, args):
+    assert getattr(lib, name)(*args) == OK
+
+
+@pytest.mark.parametrize("dims", (1, 2, 3, 4))
+def test_decode_block_any_dimension(lib, dims):
+    n = 4**dims
+    src = np.random.default_rng(dims).integers(0, 256, int(n * RATE / 8), np.uint8)
+    out = np.empty(n, np.float32)
+    assert lib.szfp_decode_block(ptr(src), src.size, RATE, 3, dims, ptr(out)) == OK
+
+
+def test_threads_zero_uses_all_cores(lib, encoded):
+    _, buf, full = encoded
+    n = len(full)
+    out = np.empty((n, 64), np.float32)
+    assert lib.szfp_decode_blocks(ptr(buf), n, NB, RATE, 4, 0, ptr(out)) == OK
+    assert np.array_equal(out, full)
+    cnt = ctypes.c_size_t()
+    th = float(np.median(full))
+    rc = lib.szfp_count_gt_blocks(ptr(buf), n, NB, RATE, 4, th, 0, ctypes.byref(cnt))
+    assert rc == OK and cnt.value == int((full.astype(np.float64) > th).sum())
