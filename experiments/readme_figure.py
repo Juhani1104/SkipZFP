@@ -106,8 +106,14 @@ def figure(t, ours, best):
     ax.text(
         x[-1] + 0.18, best[-1] - 0.16, "best baseline", color=t["muted"], va="center"
     )
-    ax.text(-0.25, 4.5, "Speedup over a zstd full scan", color=t["muted"], va="bottom")
-    ax.set_xlabel("selectivity")
+    ax.text(
+        -0.25,
+        4.5,
+        "How many times faster than reading the whole array",
+        color=t["muted"],
+        va="bottom",
+    )
+    ax.set_xlabel("selectivity (fraction of values that match)")
     fig.subplots_adjust(left=0.06, right=0.99, bottom=0.2, top=0.88)
     return fig
 
