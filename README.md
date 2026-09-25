@@ -6,5 +6,4 @@
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-green)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-A Zarr v3 codec that makes ZFP-compressed arrays queryable: skip the blocks that can't
-match, decode only the ones that might.
+**Make ZFP-compressed arrays queryable.**
