@@ -107,7 +107,7 @@ def figure(t):
     ax.set_ylim(0, 36)
     ax.axis("off")
 
-    ax.text(1, 33, "write", color=t["muted"], fontsize=10)
+    ax.text(7, 22.2, "write", color=t["muted"], fontsize=10, ha="center")
 
     box(ax, t, 7, 17, 12, 7, "float32\nchunk")
     box(ax, t, 25, 25, 17, 7, "ZFP blocks\n4×4×4, fixed rate")

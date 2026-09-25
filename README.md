@@ -3,6 +3,7 @@
 [![CI](https://github.com/Juhani1104/SkipZFP/actions/workflows/ci.yml/badge.svg)](https://github.com/Juhani1104/SkipZFP/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Juhani1104/SkipZFP/branch/main/graph/badge.svg)](https://codecov.io/gh/Juhani1104/SkipZFP)
 [![Zarr v3 codec](https://img.shields.io/badge/zarr-v3%20codec-7b3fbf)](https://zarr-specs.readthedocs.io/en/latest/v3/core/index.html)
+[![Built on ZFP 1.0](https://img.shields.io/badge/built%20on-ZFP%201.0-2c5aa0)](https://github.com/LLNL/zfp)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-green)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
@@ -10,7 +11,7 @@
 
 SkipZFP is a Zarr v3 codec for float32 scientific arrays. It stores data as
 [ZFP](https://github.com/LLNL/zfp) fixed-rate blocks plus a few bytes of bounds per
-block, so a query such as *count(x > T)* can tell which 4 x 4 x 4 blocks cannot match,
+block, so a query such as *count(x > T)* can tell which 4×4×4 blocks cannot match,
 skip them without reading them, and decode only the blocks that might.
 
 <p align="center">
@@ -28,9 +29,8 @@ from Google Cloud Storage.</sub>
 - **Reads only what can match.** Fixed-rate blocks sit at computable offsets, so the
   planner turns the surviving blocks straight into byte-range requests.
 - **Faster than every baseline, up to 50% selectivity.** On ten years of ERA5 2 m
-  temperature in Google Cloud Storage, threshold queries beat the fastest zone-map
-  baseline at every selectivity from 0.1% to 50% (1.04–1.82x) and a zstd full scan by
-  1.3–3.5x.
+  temperature in Google Cloud Storage, threshold queries beat the fastest baseline at
+  every selectivity from 0.1% to 50% (1.04–1.82x) and a zstd full scan by 1.3–3.5x.
 - **Small and standard.** Block bounds add 3.16% to an 8 bpv payload, and the arrays are
   ordinary Zarr v3 arrays with no side index.
 
@@ -97,29 +97,30 @@ Cloud Storage) or a path, and its result also reports bytes, requests and time p
   </picture>
 </p>
 
-1. **Fixed-rate blocks.** Every 4 x 4 x 4 block compresses to exactly `rate x 64 / 8`
+1. **Fixed-rate blocks.** Every 4×4×4 block compresses to exactly `rate × 64 / 8`
    bytes, so block *k* starts at a known offset and can be fetched with a range request.
 2. **Block bounds.** For each block SkipZFP keeps its minimum and maximum, quantized to
    one byte each within the sub-chunk's range, plus the sub-chunk's largest
    reconstruction error, so the bounds hold for both the original and the decoded
    values.
 3. **Three-valued planning.** A block is OUT (skip), IN (every value matches; count it
-   from metadata) or MAYBE (read and decode). Adjacent MAYBE blocks are merged into one
+   from metadata) or MAYBE (read and decode). Nearby MAYBE blocks are merged into one
    request, and decoding runs in C while later requests are still downloading.
 4. **Layout knobs.** `sub_chunk` packs several small units into one object for fewer
    requests; `block_order=(1, 2, 0)` stores each block column along time contiguously,
    which makes a point time series one range read; `layers` stores bit-plane prefixes so
-   a query can read a coarser rate first.
+   a query can read only a lower-rate prefix.
 
 ## Results
 
-All numbers come from the experiments in [`experiments/`](experiments), run on an
-n2-standard-16 VM (us-central1-b) reading from Google Cloud Storage.
+From the experiments in [`experiments/`](experiments). Query times come from an
+n2-standard-16 VM (us-central1-b) reading from Google Cloud Storage; accuracy and
+overhead are computed offline.
 
 | Experiment | Headline |
 |---|---|
 | Threshold query | 1.04–1.82x faster than the best baseline (t2m, 0.1–50%) |
-| Point query | 140 KB per query; chunked Zarr reads 0.8–19 MB |
+| Point query | 140 KB per query; chunked and sharded Zarr read 0.8–19 MB |
 | Aggregates | error bounds never violated; sampling CIs miss up to 14% |
 | Filtered aggregates | guaranteed COUNT interval from metadata alone |
 | Overhead | 3.16% at 8 bpv |
@@ -129,10 +130,11 @@ n2-standard-16 VM (us-central1-b) reading from Google Cloud Storage.
 | Level | Command | Needs |
 |---|---|---|
 | Redraw figures | `python experiments/figures.py` *(with the paper)* | this repo |
-| Check locally | `pytest` and `exp1_point_query.py check` | a few GB |
+| Run the tests | `pytest` | this repo |
 | Rerun everything | `BUCKET=gs://… bash experiments/run_cloud.sh` | a GCP VM and bucket |
 
-On a Debian or Ubuntu VM you create, `run_cloud.sh` installs the dependencies, builds libzfp, downloads ERA5 from the public
+On a Debian or Ubuntu VM you create, `run_cloud.sh` installs the dependencies, builds
+libzfp, downloads ERA5 from the public
 [ARCO-ERA5](https://github.com/google-research/arco-era5) store, writes every format to
 your bucket, and runs each experiment. Every step can be rerun and resumes where it
 stopped. The published results used an n2-standard-16 VM in us-central1-b.
@@ -169,14 +171,7 @@ experiments/    data download, experiments, results, cloud runner
 
 ## Citation
 
-```bibtex
-@misc{skipzfp,
-  title  = {SkipZFP: ...},
-  author = {...},
-  year   = {2026},
-  note   = {https://github.com/Juhani1104/SkipZFP}
-}
-```
+A paper describing SkipZFP is in preparation.
 
 ## License
 
