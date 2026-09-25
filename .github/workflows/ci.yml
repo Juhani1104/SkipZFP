@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install ruff==0.16.8 clang-format==23.1.1
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: clang-format --dry-run -Werror skipzfp/csrc/*.[ch] experiments/*.c
+
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.11"   # the environment behind the published results
+            pinned: true
+            coverage: true
+          - python: "3.13"   # latest releases of every dependency
+            pinned: false
+            coverage: false
+    env:
+      ZFP_DIR: ${{ github.workspace }}/.zfp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Cache libzfp
+        id: zfp-cache
+        uses: actions/cache@v4
+        with:
+          path: .zfp
+          key: zfp-1.0.1-ubuntu-24.04
+
+      - name: Build libzfp 1.0.1
+        if: steps.zfp-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone -q --depth 1 --branch 1.0.1 https://github.com/LLNL/zfp.git /tmp/zfp
+          cmake -S /tmp/zfp -B /tmp/zfp/build -DCMAKE_INSTALL_PREFIX="$ZFP_DIR" \
+            -DBUILD_TESTING=OFF -DBUILD_UTILITIES=OFF
+          cmake --build /tmp/zfp/build -j "$(nproc)" --target install
+
+      - name: Install
+        run: |
+          if [ "${{ matrix.pinned }}" = "true" ]; then
+            pip install -r requirements.txt
+          else
+            pip install zfpy pytest
+          fi
+          pip install -e .
+
+      - name: Rebuild the C library with coverage
+        if: matrix.coverage
+        run: |
+          pip install setuptools pytest-cov gcovr
+          SKIPZFP_COVERAGE=1 python setup.py -q build_ext --inplace --force --build-temp build/cov
+
+      - name: Test
+        if: ${{ !matrix.coverage }}
+        run: python -m pytest -q tests
+
+      - name: Test with coverage
+        if: matrix.coverage
+        run: |
+          python -m pytest -q tests --cov=skipzfp --cov-report=xml:coverage.xml
+          gcovr --root . --filter skipzfp/csrc/ --object-directory build/cov \
+            --xml c-coverage.xml --print-summary
+
+      - name: Upload coverage
+        if: matrix.coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml,c-coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true

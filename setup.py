@@ -27,6 +27,7 @@ class BuildShared(build_ext):
 zfp = zfp_prefix()
 csrc = sorted(str(p) for p in Path("skipzfp/csrc").glob("*.c"))
 lib_dirs = [str(zfp / d) for d in ("lib", "lib64") if (zfp / d).exists()]
+coverage = os.environ.get("SKIPZFP_COVERAGE") == "1"
 
 setup(
     ext_modules=[
@@ -37,8 +38,9 @@ setup(
             library_dirs=lib_dirs,
             runtime_library_dirs=lib_dirs,
             libraries=["zfp", "m"],
-            extra_compile_args=["-O3", "-fopenmp"],
-            extra_link_args=["-fopenmp"],
+            extra_compile_args=["-O0" if coverage else "-O3", "-fopenmp"]
+            + (["--coverage"] if coverage else []),
+            extra_link_args=["-fopenmp"] + (["--coverage"] if coverage else []),
         )
     ],
     cmdclass={"build_ext": BuildShared},
