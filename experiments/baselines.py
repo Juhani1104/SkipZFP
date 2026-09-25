@@ -29,7 +29,7 @@ POOL = ThreadPoolExecutor(os.cpu_count() or 4)
 
 class _C:
     def __init__(self):
-        src = HERE / "native" / "blosc_count.c"
+        src = HERE / "blosc_count.c"
         so = src.with_suffix(".so")
         if not so.exists() or so.stat().st_mtime < src.stat().st_mtime:
             cmd = ["gcc", "-O3", "-fPIC", "-shared", str(src), "-o", str(so)]
