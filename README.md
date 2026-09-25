@@ -13,7 +13,14 @@ SkipZFP is a Zarr v3 codec for float32 scientific arrays. It stores data as
 block, so a query such as *count(x > T)* can tell which 4 x 4 x 4 blocks cannot match,
 skip them without reading them, and decode only the blocks that might.
 
-<p align="center"><i>[ Figure: threshold-query speedup on ten years of ERA5 — added with the paper ]</i></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/speedup-dark.svg">
+    <img src=".github/speedup-light.svg" width="760"
+         alt="Threshold-query speedup over a zstd full scan on ten years of ERA5 temperature:
+              SkipZFP 3.5x at 0.1% selectivity down to 1.3x at 50%, above the best baseline throughout">
+  </picture>
+</p>
 
 - **Reads only what can match.** Fixed-rate blocks sit at computable offsets, so the
   planner turns the surviving blocks straight into byte-range requests.
@@ -135,6 +142,7 @@ stopped. The published results used an n2-standard-16 VM in us-central1-b.
 | Filtered aggregates | `exp4_filtered_aggregate.py` | `results/exp4_filtered_aggregate.json` |
 | Metadata overhead | `exp5_overhead.py` | `results/exp5_overhead.json` |
 | Object-size sensitivity | `sensitivity_object_size.py` | `results/sensitivity_object_size.jsonl` |
+| README figure | `readme_figure.py` | `.github/speedup-*.svg` |
 
 </details>
 
