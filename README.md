@@ -53,16 +53,18 @@ import zarr
 from skipzfp import SkipZFPCodec, query_gt, write_meta
 
 # a smooth synthetic field: 256 hours on a 128 x 256 grid
-t, y, x = np.meshgrid(
-    np.arange(256), np.arange(128), np.arange(256), indexing="ij"
-)
+t, y, x = np.meshgrid(np.arange(256), np.arange(128), np.arange(256), indexing="ij")
 data = 280 + 10 * np.sin(x / 20) + 8 * np.cos(y / 15) + 3 * np.sin(t / 30)
 data = data.astype("float32")
 
 codec = SkipZFPCodec(rate=8, sub_chunk=(64, 16, 32), block_order=(1, 2, 0))
 z = zarr.open_group("demo.zarr", mode="w").create_array(
-    "t2m", shape=data.shape, chunks=(64, 128, 256), dtype="float32",
-    serializer=codec, compressors=None,
+    "t2m",
+    shape=data.shape,
+    chunks=(64, 128, 256),
+    dtype="float32",
+    serializer=codec,
+    compressors=None,
 )
 z[:] = data
 
