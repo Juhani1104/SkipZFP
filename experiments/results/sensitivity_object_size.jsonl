@@ -1,0 +1,140 @@
+{"var": "ws", "cfg": "k8", "sel": 0.5, "rep": 4, "threshold": 3.9233365058898926, "seconds": 0.8569269780055038, "count": 143655465, "requests": 149, "bytes": 295943989, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.2, "rep": 4, "threshold": 288.0428771972656, "seconds": 0.4266715169942472, "count": 57456519, "requests": 67, "bytes": 201546100, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.1, "rep": 4, "threshold": 292.1673583984375, "seconds": 1.0789178760023788, "count": 28730871, "requests": 60, "bytes": 163493684, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.5, "rep": 4, "threshold": 280.96051025390625, "seconds": 0.9452433159967768, "count": 143654612, "requests": 150, "bytes": 266243573, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.5, "rep": 2, "threshold": 280.96051025390625, "seconds": 0.5487258689972805, "count": 143654612, "requests": 150, "bytes": 266243573, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.1, "rep": 2, "threshold": 9.641593933105469, "seconds": 0.7232335790031357, "count": 28488632, "requests": 80, "bytes": 290986420, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.5, "rep": 1, "threshold": 280.96051025390625, "seconds": 0.44582036299834726, "count": 143399817, "requests": 84, "bytes": 258295092, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.05, "rep": 0, "threshold": 295.602294921875, "seconds": 0.2682052300006035, "count": 14365527, "requests": 55, "bytes": 138202228, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.5, "rep": 0, "threshold": 3.9233365058898926, "seconds": 0.5523101279977709, "count": 142537916, "requests": 73, "bytes": 301891444, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.5, "rep": 0, "threshold": 280.96051025390625, "seconds": 0.5192073069993057, "count": 143399817, "requests": 84, "bytes": 258295092, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.2, "rep": 3, "threshold": 288.0428771972656, "seconds": 0.4244825409987243, "count": 57462192, "requests": 144, "bytes": 182491573, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.05, "rep": 4, "threshold": 11.729150772094727, "seconds": 0.5894795939966571, "count": 14365614, "requests": 152, "bytes": 283484213, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.05, "rep": 1, "threshold": 11.729150772094727, "seconds": 0.42748141899937764, "count": 14365614, "requests": 152, "bytes": 283484213, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.05, "rep": 1, "threshold": 295.602294921875, "seconds": 0.554497908000485, "count": 14365527, "requests": 113, "bytes": 116259893, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.1, "rep": 3, "threshold": 9.641593933105469, "seconds": 0.6193411979984376, "count": 28730992, "requests": 149, "bytes": 294370677, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.2, "rep": 2, "threshold": 288.0428771972656, "seconds": 0.7774710029989365, "count": 57462192, "requests": 144, "bytes": 182491573, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.1, "rep": 1, "threshold": 9.641593933105469, "seconds": 0.5566037519965903, "count": 28730992, "requests": 149, "bytes": 294370677, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.2, "rep": 2, "threshold": 7.190594673156738, "seconds": 0.5556716260034591, "count": 57462171, "requests": 149, "bytes": 296296949, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.05, "rep": 2, "threshold": 11.729150772094727, "seconds": 0.5097446060026414, "count": 14365614, "requests": 152, "bytes": 283484213, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.1, "rep": 1, "threshold": 292.1673583984375, "seconds": 0.31024691299535334, "count": 28730874, "requests": 134, "bytes": 140659573, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.1, "rep": 2, "threshold": 292.1673583984375, "seconds": 0.34530286499648355, "count": 28730874, "requests": 134, "bytes": 140659573, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.1, "rep": 0, "threshold": 9.641593933105469, "seconds": 0.5237761309981579, "count": 28488632, "requests": 80, "bytes": 290986420, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.5, "rep": 3, "threshold": 3.9233365058898926, "seconds": 0.5324134410038823, "count": 143655465, "requests": 149, "bytes": 295943989, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.5, "rep": 0, "threshold": 3.9233365058898926, "seconds": 0.5282612759983749, "count": 143655465, "requests": 149, "bytes": 295943989, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.5, "rep": 2, "threshold": 3.9233365058898926, "seconds": 0.513967450002383, "count": 143655465, "requests": 149, "bytes": 295943989, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.5, "rep": 3, "threshold": 280.96051025390625, "seconds": 0.3873873550037388, "count": 143654612, "requests": 150, "bytes": 266243573, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.5, "rep": 2, "threshold": 280.96051025390625, "seconds": 0.3914720840039081, "count": 143399817, "requests": 84, "bytes": 258295092, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.1, "rep": 3, "threshold": 9.641593933105469, "seconds": 0.3943172750005033, "count": 28488632, "requests": 80, "bytes": 290986420, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.2, "rep": 1, "threshold": 288.0428771972656, "seconds": 0.5942962420012918, "count": 57456519, "requests": 67, "bytes": 201546100, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.05, "rep": 3, "threshold": 11.729150772094727, "seconds": 0.34021485700213816, "count": 14249142, "requests": 94, "bytes": 254572532, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.05, "rep": 3, "threshold": 295.602294921875, "seconds": 0.3219547499975306, "count": 14365527, "requests": 55, "bytes": 138202228, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.05, "rep": 2, "threshold": 295.602294921875, "seconds": 0.2840405390015803, "count": 14365527, "requests": 113, "bytes": 116259893, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.1, "rep": 4, "threshold": 292.1673583984375, "seconds": 0.6056280330012669, "count": 28730874, "requests": 134, "bytes": 140659573, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.5, "rep": 1, "threshold": 280.96051025390625, "seconds": 0.4159658170028706, "count": 143654612, "requests": 150, "bytes": 266243573, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.1, "rep": 2, "threshold": 9.641593933105469, "seconds": 0.5725113359949319, "count": 28730992, "requests": 149, "bytes": 294370677, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.5, "rep": 1, "threshold": 3.9233365058898926, "seconds": 0.5090867409962812, "count": 142537916, "requests": 73, "bytes": 301891444, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.1, "rep": 2, "threshold": 292.1673583984375, "seconds": 0.3315183659942704, "count": 28730871, "requests": 60, "bytes": 163493684, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.2, "rep": 2, "threshold": 7.190594673156738, "seconds": 0.44273526400502305, "count": 57013024, "requests": 73, "bytes": 301238516, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.5, "rep": 3, "threshold": 280.96051025390625, "seconds": 0.35543498100014403, "count": 143399817, "requests": 84, "bytes": 258295092, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.2, "rep": 3, "threshold": 7.190594673156738, "seconds": 0.48510523499862757, "count": 57013024, "requests": 73, "bytes": 301238516, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.1, "rep": 0, "threshold": 9.641593933105469, "seconds": 0.4530904549974366, "count": 28730992, "requests": 149, "bytes": 294370677, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.05, "rep": 0, "threshold": 11.729150772094727, "seconds": 0.5187684090051334, "count": 14249142, "requests": 94, "bytes": 254572532, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.2, "rep": 0, "threshold": 7.190594673156738, "seconds": 0.46205775599810295, "count": 57462171, "requests": 149, "bytes": 296296949, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.05, "rep": 4, "threshold": 11.729150772094727, "seconds": 0.35362429300585063, "count": 14249142, "requests": 94, "bytes": 254572532, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.2, "rep": 1, "threshold": 288.0428771972656, "seconds": 0.6952110310012358, "count": 57462192, "requests": 144, "bytes": 182491573, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.2, "rep": 0, "threshold": 288.0428771972656, "seconds": 0.40526309899723856, "count": 57462192, "requests": 144, "bytes": 182491573, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.5, "rep": 0, "threshold": 280.96051025390625, "seconds": 0.4048851299958187, "count": 143654612, "requests": 150, "bytes": 266243573, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.2, "rep": 0, "threshold": 7.190594673156738, "seconds": 0.44962679099990055, "count": 57013024, "requests": 73, "bytes": 301238516, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.5, "rep": 2, "threshold": 3.9233365058898926, "seconds": 0.4789831439993577, "count": 142537916, "requests": 73, "bytes": 301891444, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.05, "rep": 0, "threshold": 11.729150772094727, "seconds": 0.45430569799646037, "count": 14365614, "requests": 152, "bytes": 283484213, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.1, "rep": 3, "threshold": 292.1673583984375, "seconds": 0.3126401089975843, "count": 28730874, "requests": 134, "bytes": 140659573, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.2, "rep": 2, "threshold": 288.0428771972656, "seconds": 0.3515652170026442, "count": 57456519, "requests": 67, "bytes": 201546100, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.05, "rep": 1, "threshold": 295.602294921875, "seconds": 0.3676426559977699, "count": 14365527, "requests": 55, "bytes": 138202228, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.1, "rep": 0, "threshold": 292.1673583984375, "seconds": 0.28567968500283314, "count": 28730874, "requests": 134, "bytes": 140659573, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.1, "rep": 3, "threshold": 292.1673583984375, "seconds": 0.36692152899922803, "count": 28730871, "requests": 60, "bytes": 163493684, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.2, "rep": 4, "threshold": 7.190594673156738, "seconds": 0.4895805950000067, "count": 57462171, "requests": 149, "bytes": 296296949, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.05, "rep": 0, "threshold": 295.602294921875, "seconds": 0.38905848099966533, "count": 14365527, "requests": 113, "bytes": 116259893, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.05, "rep": 4, "threshold": 295.602294921875, "seconds": 0.2984508619992994, "count": 14365527, "requests": 113, "bytes": 116259893, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.1, "rep": 1, "threshold": 9.641593933105469, "seconds": 0.3490578409982845, "count": 28488632, "requests": 80, "bytes": 290986420, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.2, "rep": 3, "threshold": 288.0428771972656, "seconds": 0.3671906090021366, "count": 57456519, "requests": 67, "bytes": 201546100, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.5, "rep": 4, "threshold": 280.96051025390625, "seconds": 0.3604833720019087, "count": 143399817, "requests": 84, "bytes": 258295092, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.5, "rep": 4, "threshold": 3.9233365058898926, "seconds": 0.5467988720047288, "count": 142537916, "requests": 73, "bytes": 301891444, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.1, "rep": 1, "threshold": 292.1673583984375, "seconds": 0.3141676829982316, "count": 28730871, "requests": 60, "bytes": 163493684, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.05, "rep": 2, "threshold": 295.602294921875, "seconds": 0.3020285300008254, "count": 14365527, "requests": 55, "bytes": 138202228, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.2, "rep": 3, "threshold": 7.190594673156738, "seconds": 0.4515145969999139, "count": 57462171, "requests": 149, "bytes": 296296949, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.1, "rep": 4, "threshold": 9.641593933105469, "seconds": 0.5849210160013172, "count": 28730992, "requests": 149, "bytes": 294370677, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.2, "rep": 4, "threshold": 7.190594673156738, "seconds": 0.4069261260010535, "count": 57013024, "requests": 73, "bytes": 301238516, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.05, "rep": 3, "threshold": 11.729150772094727, "seconds": 0.84813142499479, "count": 14365614, "requests": 152, "bytes": 283484213, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.2, "rep": 4, "threshold": 288.0428771972656, "seconds": 0.5965671320009278, "count": 57462192, "requests": 144, "bytes": 182491573, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.2, "rep": 1, "threshold": 7.190594673156738, "seconds": 0.4064478569998755, "count": 57462171, "requests": 149, "bytes": 296296949, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k8", "sel": 0.5, "rep": 1, "threshold": 3.9233365058898926, "seconds": 0.4946871549982461, "count": 143655465, "requests": 149, "bytes": 295943989, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k8", "sel": 0.05, "rep": 3, "threshold": 295.602294921875, "seconds": 0.28226520400494337, "count": 14365527, "requests": 113, "bytes": 116259893, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.05, "rep": 4, "threshold": 295.602294921875, "seconds": 0.38152216900198255, "count": 14365527, "requests": 55, "bytes": 138202228, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.2, "rep": 0, "threshold": 288.0428771972656, "seconds": 0.29816836299869465, "count": 57456519, "requests": 67, "bytes": 201546100, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.1, "rep": 4, "threshold": 9.641593933105469, "seconds": 0.5312476979961502, "count": 28488632, "requests": 80, "bytes": 290986420, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.2, "rep": 1, "threshold": 7.190594673156738, "seconds": 0.4241664400033187, "count": 57013024, "requests": 73, "bytes": 301238516, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.05, "rep": 1, "threshold": 11.729150772094727, "seconds": 0.3478892829953111, "count": 14249142, "requests": 94, "bytes": 254572532, "batch": "meta_t_chunk_16"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.1, "rep": 0, "threshold": 292.1673583984375, "seconds": 0.6200555500035989, "count": 28730871, "requests": 60, "bytes": 163493684, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.05, "rep": 2, "threshold": 11.729150772094727, "seconds": 0.33013868200214347, "count": 14249142, "requests": 94, "bytes": 254572532, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.5, "rep": 3, "threshold": 3.9233365058898926, "seconds": 0.48546871500002453, "count": 142537916, "requests": 73, "bytes": 301891444, "batch": "meta_t_chunk_16"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.0001, "rep": 2, "seconds": 0.27273781599797076, "count": 28717, "requests": 59, "bytes": 20871987, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.0001, "rep": 4, "seconds": 0.18641740900056902, "count": 28733, "requests": 47, "bytes": 19504565, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.0001, "rep": 1, "seconds": 0.29815409400180215, "count": 28740, "requests": 43, "bytes": 20918453, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.001, "rep": 1, "seconds": 0.30805783699906897, "count": 287332, "requests": 110, "bytes": 61092917, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.01, "rep": 2, "seconds": 0.3515001289997599, "count": 2873100, "requests": 56, "bytes": 79547635, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.01, "rep": 1, "seconds": 0.6495179069970618, "count": 2873070, "requests": 163, "bytes": 187567477, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.01, "rep": 0, "seconds": 0.3762587989986059, "count": 2873070, "requests": 163, "bytes": 187567477, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.001, "rep": 3, "seconds": 0.22020229399640812, "count": 287296, "requests": 41, "bytes": 38576563, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.0001, "rep": 1, "seconds": 0.2238997099993867, "count": 28733, "requests": 32, "bytes": 24239731, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.01, "rep": 4, "seconds": 0.44576878099906025, "count": 2854585, "requests": 133, "bytes": 158321523, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.001, "rep": 1, "seconds": 0.2905425490025664, "count": 287296, "requests": 41, "bytes": 38576563, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.001, "rep": 0, "seconds": 0.2779748440007097, "count": 287296, "requests": 41, "bytes": 38576563, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.001, "rep": 3, "seconds": 0.20268007500271779, "count": 286008, "requests": 99, "bytes": 60362163, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.01, "rep": 4, "seconds": 0.31699938700330677, "count": 2873070, "requests": 163, "bytes": 187567477, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.0001, "rep": 0, "seconds": 0.19466380900121294, "count": 28733, "requests": 32, "bytes": 24239731, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.001, "rep": 4, "seconds": 0.8143472220035619, "count": 287332, "requests": 110, "bytes": 61092917, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.001, "rep": 4, "seconds": 0.21977275399694918, "count": 287296, "requests": 41, "bytes": 38576563, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.0001, "rep": 2, "seconds": 0.22099443300248822, "count": 28740, "requests": 43, "bytes": 20918453, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.0001, "rep": 2, "seconds": 0.2567623119975906, "count": 28733, "requests": 32, "bytes": 24239731, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.0001, "rep": 3, "seconds": 0.6412875230016652, "count": 28733, "requests": 32, "bytes": 24239731, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.001, "rep": 0, "seconds": 0.4606081390011241, "count": 287332, "requests": 110, "bytes": 61092917, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.001, "rep": 2, "seconds": 0.2215233149981941, "count": 287296, "requests": 41, "bytes": 38576563, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.001, "rep": 3, "seconds": 0.3102355090013589, "count": 287332, "requests": 110, "bytes": 61092917, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.001, "rep": 2, "seconds": 0.3427514099967084, "count": 287332, "requests": 110, "bytes": 61092917, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.0001, "rep": 4, "seconds": 0.18899536499520764, "count": 28733, "requests": 32, "bytes": 24239731, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.01, "rep": 1, "seconds": 0.31007348900311626, "count": 2873100, "requests": 83, "bytes": 69978293, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.01, "rep": 2, "seconds": 0.22989849700388731, "count": 2873100, "requests": 83, "bytes": 69978293, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.01, "rep": 3, "seconds": 0.3458579989965074, "count": 2854585, "requests": 133, "bytes": 158321523, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.01, "rep": 4, "seconds": 0.8206542819971219, "count": 2873100, "requests": 56, "bytes": 79547635, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.001, "rep": 1, "seconds": 0.23388464500021655, "count": 287296, "requests": 59, "bytes": 32801973, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.01, "rep": 0, "seconds": 0.2757505429981393, "count": 2873100, "requests": 83, "bytes": 69978293, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.01, "rep": 0, "seconds": 0.9711665060021915, "count": 2854585, "requests": 133, "bytes": 158321523, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.0001, "rep": 1, "seconds": 0.192052436999802, "count": 28733, "requests": 47, "bytes": 19504565, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.001, "rep": 0, "seconds": 0.20931539699813584, "count": 286008, "requests": 99, "bytes": 60362163, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.001, "rep": 0, "seconds": 0.17792415899748448, "count": 287296, "requests": 59, "bytes": 32801973, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.01, "rep": 3, "seconds": 0.21126259300217498, "count": 2873100, "requests": 83, "bytes": 69978293, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.01, "rep": 1, "seconds": 0.3061861969981692, "count": 2873100, "requests": 56, "bytes": 79547635, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.0001, "rep": 3, "seconds": 0.2678530490011326, "count": 28740, "requests": 43, "bytes": 20918453, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.01, "rep": 3, "seconds": 0.2541618010000093, "count": 2873100, "requests": 56, "bytes": 79547635, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.0001, "rep": 4, "seconds": 0.21115631900465814, "count": 28717, "requests": 59, "bytes": 20871987, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.01, "rep": 1, "seconds": 0.309078167003463, "count": 2854585, "requests": 133, "bytes": 158321523, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.0001, "rep": 1, "seconds": 0.18481682499987073, "count": 28717, "requests": 59, "bytes": 20871987, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.0001, "rep": 3, "seconds": 0.28561523600365035, "count": 28733, "requests": 47, "bytes": 19504565, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.01, "rep": 2, "seconds": 0.4394839710002998, "count": 2873070, "requests": 163, "bytes": 187567477, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.001, "rep": 2, "seconds": 0.16990193800302222, "count": 286008, "requests": 99, "bytes": 60362163, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.001, "rep": 4, "seconds": 0.20484081899485318, "count": 286008, "requests": 99, "bytes": 60362163, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.001, "rep": 1, "seconds": 0.25544793100561947, "count": 286008, "requests": 99, "bytes": 60362163, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.0001, "rep": 0, "seconds": 0.28120784299972, "count": 28717, "requests": 59, "bytes": 20871987, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.01, "rep": 4, "seconds": 0.209224306003307, "count": 2873100, "requests": 83, "bytes": 69978293, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.0001, "rep": 4, "seconds": 0.16495647700503469, "count": 28740, "requests": 43, "bytes": 20918453, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.01, "rep": 2, "seconds": 0.2827684619987849, "count": 2854585, "requests": 133, "bytes": 158321523, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.001, "rep": 3, "seconds": 0.29867971000203397, "count": 287296, "requests": 59, "bytes": 32801973, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.0001, "rep": 2, "seconds": 0.1657808070012834, "count": 28733, "requests": 47, "bytes": 19504565, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.01, "rep": 3, "seconds": 0.3499904609998339, "count": 2873070, "requests": 163, "bytes": 187567477, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.001, "rep": 4, "seconds": 0.1975386809936026, "count": 287296, "requests": 59, "bytes": 32801973, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k64t_split4", "sel": 0.01, "rep": 0, "seconds": 0.24020669900346547, "count": 2873100, "requests": 56, "bytes": 79547635, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k64t_split4", "sel": 0.0001, "rep": 3, "seconds": 0.5029637609986821, "count": 28717, "requests": 59, "bytes": 20871987, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.001, "rep": 2, "seconds": 0.26935037399380235, "count": 287296, "requests": 59, "bytes": 32801973, "batch": "meta_t_chunk_1"}
+{"var": "ws", "cfg": "k8", "sel": 0.0001, "rep": 0, "seconds": 0.26773484199657105, "count": 28740, "requests": 43, "bytes": 20918453, "batch": "meta_t_chunk_1"}
+{"var": "t2m", "cfg": "k8", "sel": 0.0001, "rep": 0, "seconds": 0.18491202699806308, "count": 28733, "requests": 47, "bytes": 19504565, "batch": "meta_t_chunk_1"}

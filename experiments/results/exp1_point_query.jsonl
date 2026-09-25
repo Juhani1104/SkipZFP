@@ -1,0 +1,396 @@
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 330, "rep": 0, "seconds": 1.084609769997769, "requests": 274, "bytes": 627049773}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 10, "rep": 0, "seconds": 0.22371638900222024, "requests": 274, "bytes": 18802690}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 1000, "rep": 2, "seconds": 1.4354393859975971, "requests": 17, "bytes": 284655616}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 2, "seconds": 3.2691996680005104, "requests": 8768, "bytes": 617386402}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 330, "rep": 1, "seconds": 0.2964145970036043, "requests": 274, "bytes": 46952809}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 1000, "rep": 2, "seconds": 1.7154288189994986, "requests": 137, "bytes": 625926921}
+{"method": "skipzfp", "size": "k64t", "mode": "latency", "n": 20, "rep": 1, "seconds": 0.06492908699874533, "p90": 0.1363435638006196, "lat": [0.06800447199930204, 0.0651608309999574, 0.04525252800522139, 0.060171862998686265, 0.05304570199950831, 0.049220016997423954, 0.0750389160020859, 0.07116924900037702, 0.07464196500222897, 0.31951844899595017, 0.05537223300052574, 0.12614412100083428, 0.11979669600259513, 0.09861466100119287, 0.048784859995066654, 0.060680959999444894, 0.04214055700140307, 0.22813854899868602, 0.06469734299753327, 0.0642585509995115], "requests": 340, "bytes": 2785280}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 1, "seconds": 2.1737582349960576, "requests": 137, "bytes": 47804468}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 2, "seconds": 0.20976982099818997, "requests": 137, "bytes": 9291177}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 1, "seconds": 2.3162308750033844, "requests": 274, "bytes": 47945304}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 100, "rep": 0, "seconds": 0.44580367500020657, "requests": 137, "bytes": 277770240}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 1, "rep": 1, "seconds": 1.0662514220020967, "requests": 137, "bytes": 3764152}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 1, "seconds": 2.7096475879952777, "requests": 137, "bytes": 617386402}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 1, "seconds": 0.754506847995799, "requests": 411, "bytes": 10188928}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 0, "seconds": 2.2871621909944224, "requests": 274, "bytes": 68918106}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "latency", "n": 20, "rep": 0, "seconds": 0.1602047299966216, "p90": 0.44555695889866914, "lat": [0.20733279200067045, 0.6100296229997184, 0.202434621998691, 0.10872480500256643, 0.12944292499742005, 0.12737757600552868, 0.090308995997475, 0.1418169169992325, 0.12999889999628067, 0.19925766599772032, 0.4669934369958355, 0.10206512099830434, 0.1342706779978471, 0.44317512799898395, 0.2154857589994208, 0.15694251499371603, 0.22595255799387814, 0.08387436300108675, 0.1634669449995272, 0.20449799500056542], "requests": 2740, "bytes": 245798376}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 10, "rep": 2, "seconds": 0.6125808220022009, "requests": 1370, "bytes": 33325544}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 1000, "rep": 1, "seconds": 1.703830137004843, "requests": 137, "bytes": 625926921}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 2, "seconds": 0.5710525429967674, "requests": 548, "bytes": 37634903}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 10, "rep": 2, "seconds": 0.7907622710044961, "requests": 196, "bytes": 508156584}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 10, "rep": 0, "seconds": 3.689347547995567, "requests": 411, "bytes": 347394496}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 1000, "rep": 1, "seconds": 7.671373006000067, "requests": 17, "bytes": 284794880}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 330, "rep": 2, "seconds": 0.8165233510007965, "requests": 274, "bytes": 699956093}
+{"method": "skipzfp", "size": "k8", "mode": "throughput", "n": 200, "rep": 1, "seconds": 14.0617558619997, "qps": 14.222974851986821, "requests": 27400, "bytes": 843481600}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 10, "rep": 0, "seconds": 1.977156417000515, "requests": 1370, "bytes": 95881198}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 2, "seconds": 0.19384849600464804, "requests": 137, "bytes": 9291177}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "throughput", "n": 200, "rep": 2, "seconds": 15.209169319001376, "qps": 13.1499620922842, "requests": 27400, "bytes": 2449047170}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 1, "rep": 1, "seconds": 0.06950506300199777, "requests": 17, "bytes": 139264}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 330, "rep": 0, "seconds": 0.6220388029978494, "requests": 274, "bytes": 35863014}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 1000, "rep": 0, "seconds": 0.48166983700502897, "requests": 274, "bytes": 83919822}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 100, "rep": 2, "seconds": 0.5102143709955271, "requests": 137, "bytes": 4436608}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 330, "rep": 1, "seconds": 0.5133607949974248, "requests": 137, "bytes": 36356837}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 330, "rep": 1, "seconds": 0.34725501500361133, "requests": 137, "bytes": 75860736}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 10, "rep": 2, "seconds": 0.19964945299579995, "requests": 137, "bytes": 4121222}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 1, "seconds": 0.24817900199559517, "requests": 137, "bytes": 9519269}
+{"method": "skipzfp", "size": "k8t", "mode": "throughput", "n": 200, "rep": 1, "seconds": 16.094314396999835, "qps": 12.426748668292593, "requests": 27400, "bytes": 28057600}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 1000, "rep": 2, "seconds": 0.37226436699711485, "requests": 137, "bytes": 101474233}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 1, "rep": 2, "seconds": 0.14938261700444855, "requests": 137, "bytes": 4217408}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "latency", "n": 20, "rep": 2, "seconds": 0.10681199900136562, "p90": 0.3014395562961, "lat": [0.2373278989980463, 0.17844331500236876, 7.173247837999952, 0.10659942300117109, 0.09604071300418582, 0.06841872099903412, 0.1733257159939967, 0.06978481999976793, 0.11811763099831296, 0.06872899600421079, 0.33266897400608286, 0.07228386199858505, 0.10702457500156015, 0.1396927739988314, 0.2979696209949907, 0.07179386100324336, 0.08888510799442884, 0.10650003700720845, 0.0718068240021239, 0.1611044649980613], "requests": 2740, "bytes": 16731166}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 100, "rep": 2, "seconds": 0.656790674001968, "requests": 137, "bytes": 595130222}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 10, "rep": 2, "seconds": 0.7938674939941848, "requests": 153, "bytes": 13090816}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 100, "rep": 1, "seconds": 0.6508930019990657, "requests": 274, "bytes": 700665818}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 1000, "rep": 0, "seconds": 0.3497456559998682, "requests": 137, "bytes": 76036096}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 100, "rep": 1, "seconds": 0.9801734020002186, "requests": 137, "bytes": 16901560}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 10, "rep": 2, "seconds": 0.08025220099807484, "requests": 17, "bytes": 1392640}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 100, "rep": 1, "seconds": 0.40220919900457375, "requests": 17, "bytes": 282427392}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 1, "rep": 1, "seconds": 0.11591900500206975, "requests": 137, "bytes": 832788}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 100, "rep": 2, "seconds": 0.18803273599769454, "requests": 137, "bytes": 3647488}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "latency", "n": 20, "rep": 2, "seconds": 0.16935627850034507, "p90": 0.3599935879981792, "lat": [0.27404366800328717, 0.14782833200297318, 0.1388626350017148, 0.1855944359995192, 0.1575612730011926, 0.3144191059982404, 0.7701639259976218, 0.23292020100052468, 0.1734387920005247, 0.14799415400193539, 3.9086825359991053, 0.18868817100155866, 0.12120537800365128, 0.17137108399765566, 0.14725686200108612, 0.19439768300071592, 0.12956725399999414, 0.12914914199791383, 0.16734147300303448, 0.15774424299888778], "requests": 5480, "bytes": 375879406}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 1, "seconds": 0.21527748499647714, "requests": 137, "bytes": 3334600}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 10, "rep": 1, "seconds": 0.45110141699842643, "requests": 137, "bytes": 492662794}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 1000, "rep": 1, "seconds": 1.0380764389992692, "requests": 274, "bytes": 703708309}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "latency", "n": 20, "rep": 2, "seconds": 0.24393121200046153, "p90": 0.971177995397011, "lat": [1.098896233997948, 2.0408506559979287, 0.15143142500164686, 0.15648168900224846, 0.2518062599992845, 0.40036471899657045, 0.23736585100414231, 0.32080582700291416, 0.15900380200037034, 0.9569870799969067, 0.25049657299678074, 0.5575716609964729, 0.1145273090005503, 0.1319463120016735, 0.13522729199758032, 0.19685526299872436, 0.16234121899469756, 0.13917482699616812, 0.9412937029992463, 0.29005738800333347], "requests": 5480, "bytes": 265612091}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 10, "rep": 2, "seconds": 0.16497945700393757, "requests": 137, "bytes": 11734259}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 1, "seconds": 3.1093935329990927, "requests": 274, "bytes": 617527238}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 1, "seconds": 0.2218234419960936, "p90": 0.9222328985029904, "lat": [2.8099814290035283, 0.24615669800550677, 0.1465584969992051, 0.21943844599445583, 0.1343858359978185, 0.22420843799773138, 1.8565655539932777, 0.3339190500046243, 0.572892646996479, 0.818418159004068, 0.6412949209989165, 0.594534484000178, 0.18006571900332347, 0.11214717700204346, 0.0927296119989478, 0.32469492200470995, 0.11226211099710781, 0.10909903100400697, 0.13967412900092313, 0.1672244990040781], "requests": 5480, "bytes": 196858976}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 10, "rep": 1, "seconds": 0.15845403199637076, "requests": 102, "bytes": 24928256}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 330, "rep": 0, "seconds": 0.732896311004879, "requests": 137, "bytes": 285065216}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 330, "rep": 1, "seconds": 0.6719630029983819, "requests": 137, "bytes": 682020202}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 1, "rep": 1, "seconds": 0.19732670600205893, "requests": 274, "bytes": 13193942}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 0, "seconds": 0.5425386179995257, "requests": 822, "bytes": 59157914}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 100, "rep": 1, "seconds": 0.25159600700135343, "requests": 274, "bytes": 28099469}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 100, "rep": 1, "seconds": 0.44527957800164586, "requests": 137, "bytes": 284504064}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 1, "rep": 1, "seconds": 0.4607422629997018, "requests": 137, "bytes": 9730805}
+{"method": "skipzfp", "size": "k8", "mode": "throughput", "n": 200, "rep": 2, "seconds": 10.102636306997738, "qps": 19.796812824140478, "requests": 27400, "bytes": 843481600}
+{"method": "skipzfp", "size": "k8t", "mode": "latency", "n": 20, "rep": 1, "seconds": 0.1240226249974512, "p90": 0.3158938771004616, "lat": [0.1924665430051391, 0.09495925899682334, 0.07809397699747933, 0.061195560003397986, 0.18320901900005993, 0.07824933400115697, 0.7567464009989635, 0.09175541299919132, 0.42201098799705505, 0.30276418600260513, 0.09132315799797652, 0.21677391999401152, 0.2883482010001899, 0.0659068599998136, 0.3041030870008399, 0.11175921499670949, 0.13743441100086784, 0.1294713179959217, 0.1185739319989807, 0.10734989299817244], "requests": 2740, "bytes": 2805760}
+{"method": "zfpacc", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 2, "seconds": 0.12900513449858408, "p90": 0.7670985434007949, "lat": [0.34892452100029914, 4.530664745005197, 0.07497700699605048, 0.317220246004581, 0.12998991800122894, 0.09703623699897435, 0.11193264599569375, 0.13154838999616913, 0.14839107399893692, 13.979989347004448, 0.07791682100651087, 0.08098721300484613, 0.2539319360002992, 0.20852957800525473, 0.07180727300146827, 0.12802035099593922, 0.0951385790031054, 0.17446204899897566, 0.07144086799962679, 0.056505241998820566], "requests": 2740, "bytes": 68785424}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 1, "seconds": 0.18545482799527235, "requests": 137, "bytes": 9519269}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 10, "rep": 2, "seconds": 0.4564825019988348, "requests": 411, "bytes": 308462989}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 1, "rep": 0, "seconds": 0.1813178570009768, "requests": 274, "bytes": 13847395}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 100, "rep": 1, "seconds": 14.495857428999443, "requests": 7261, "bytes": 185220832}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 2, "seconds": 0.3654253679997055, "requests": 274, "bytes": 9432013}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 10, "rep": 1, "seconds": 0.6062777780025499, "requests": 1233, "bytes": 86708398}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 0, "seconds": 0.43061289899924304, "requests": 274, "bytes": 19404923}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 1, "rep": 1, "seconds": 0.1788422690005973, "requests": 137, "bytes": 9730805}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 2, "seconds": 0.44137416900048265, "requests": 822, "bytes": 18016144}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 1, "seconds": 0.4778599950004718, "requests": 548, "bytes": 38263807}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 1000, "rep": 1, "seconds": 0.2537700320026488, "requests": 137, "bytes": 48704658}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "latency", "n": 20, "rep": 1, "seconds": 0.16619780299879494, "p90": 0.28671074420271914, "lat": [0.23569444700115127, 0.2687703110059374, 0.15101703500113217, 0.18322799800080247, 0.15748380500008352, 0.17084227300074417, 0.23651010900357505, 0.2833985820034286, 0.12186905000271508, 0.4935292629961623, 0.20958663999772398, 0.10341276100371033, 0.12398606699571246, 0.13896260999899823, 0.125476367000374, 0.09426124399760738, 0.14449690000037663, 0.1615533329968457, 0.3165202039963333, 0.27060313400579616], "requests": 5480, "bytes": 268071257}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 330, "rep": 1, "seconds": 8.544060565000109, "requests": 8768, "bytes": 224643104}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "latency", "n": 20, "rep": 0, "seconds": 0.3466742554992379, "p90": 0.6418368998980444, "lat": [0.1864940489977016, 0.36348475299746497, 30.170370785002888, 0.24954476499988232, 0.27760017399850767, 0.21897630600142293, 0.33917693800322013, 0.21861104299750878, 0.13158715800091159, 0.3399509160008165, 0.615296853997279, 0.21734902200114448, 0.6006005259987433, 0.4406719129983685, 0.6200721869972767, 0.4281300980001106, 0.3112830799946096, 0.4377714809961617, 0.3533975949976593, 0.8377193160049501], "requests": 5480, "bytes": 375878870}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 1, "rep": 0, "seconds": 0.6046749649976846, "requests": 274, "bytes": 18802690}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 1, "rep": 0, "seconds": 0.2910289260034915, "requests": 137, "bytes": 3909496}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 10, "rep": 0, "seconds": 0.39314944999932777, "requests": 274, "bytes": 347253660}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 10, "rep": 0, "seconds": 0.08447928000532556, "requests": 17, "bytes": 139264}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 0, "seconds": 0.1462230434990488, "p90": 0.2426851283984435, "lat": [0.23091764099808643, 0.16416063899669098, 0.18677017200388946, 0.20993715400254587, 0.13656930599972839, 0.1539570029999595, 0.16663586000504438, 0.13170470300246961, 0.16287603200180456, 0.11007138700369978, 0.4727449380006874, 0.34859251500165556, 0.2076805590040749, 0.1309683329964173, 0.13848908399813809, 0.12844354499975452, 0.1241574679952464, 0.09869648699532263, 0.09548115299548954, 0.12147566999919945], "requests": 5480, "bytes": 195263172}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 100, "rep": 2, "seconds": 0.9994870230002562, "requests": 274, "bytes": 598899831}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "throughput", "n": 200, "rep": 1, "seconds": 18.726525687001413, "qps": 10.680037682527805, "requests": 54800, "bytes": 3759075635}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 330, "rep": 1, "seconds": 1.2455673439981183, "requests": 274, "bytes": 37479689}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 0, "seconds": 0.13876251200417755, "requests": 137, "bytes": 9791275}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 330, "rep": 0, "seconds": 2.847502832999453, "requests": 8768, "bytes": 224643104}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 10, "rep": 0, "seconds": 0.15461840300122276, "requests": 137, "bytes": 12724543}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 1, "rep": 1, "seconds": 0.1510444000014104, "requests": 137, "bytes": 849969}
+{"method": "zstd", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 1, "seconds": 0.08371441499548382, "p90": 0.17807527510085513, "lat": [0.40936608600168256, 0.15522238799894694, 0.06825620900053764, 0.0701128479995532, 0.054931760001636576, 0.06699870299780741, 0.08426716099347686, 0.0880399599991506, 0.05349510700034443, 0.07396006899944041, 0.09390345000429079, 0.11583270199480467, 0.3059843559967703, 0.07638496700383257, 0.06341869300376857, 0.0539936929999385, 0.1101298220019089, 0.16386315500130877, 0.08316166899749078, 0.11007312899891986], "requests": 2740, "bytes": 194042256}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 1, "rep": 1, "seconds": 0.6086680230000638, "requests": 274, "bytes": 18807381}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 2, "seconds": 2.9071625750002568, "requests": 274, "bytes": 617527238}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 10, "rep": 0, "seconds": 0.3444571329964674, "requests": 274, "bytes": 261581180}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 1, "seconds": 0.20240894999733428, "requests": 274, "bytes": 9660105}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "latency", "n": 20, "rep": 1, "seconds": 0.08435842899780255, "p90": 0.4027854293999554, "lat": [0.47548094100056915, 0.07773057799931848, 0.42575567399762804, 0.08804093000071589, 0.09248825100075919, 0.08299343600083375, 0.07077372499770718, 0.06903317799879005, 0.09104505899449578, 0.06294504900142783, 0.089103651996993, 0.07094088300073054, 0.19387136099976487, 0.4002331800002139, 0.1012421199993696, 0.05917590999888489, 0.07296775100257946, 0.08572342199477134, 0.06703854499937734, 0.07849313299811911], "requests": 2740, "bytes": 245614217}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 1, "rep": 1, "seconds": 0.11928954199538566, "requests": 137, "bytes": 12071090}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 1, "rep": 0, "seconds": 0.06559090099472087, "requests": 17, "bytes": 139264}
+{"method": "zfpacc", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 1, "seconds": 8.055247452000913, "qps": 24.828535832294047, "requests": 27400, "bytes": 699655840}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 0, "seconds": 0.2602324415020121, "p90": 0.48785668290074696, "lat": [0.5648697269934928, 0.5971083650001674, 0.2883890439989045, 0.1651575750001939, 0.1390305780005292, 0.3575652219951735, 0.45883348600182217, 0.3141298240007018, 0.2494838679995155, 0.24782868399779545, 0.3464749910053797, 0.065851963001478, 0.16932557099789847, 0.24869355499686208, 0.19821851899905596, 0.4792996780015528, 0.27098101500450866, 0.29243584699725034, 0.1597969770009513, 0.0819957109997631], "requests": 2740, "bytes": 192446452}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 1000, "rep": 0, "seconds": 1.6937051429995336, "requests": 137, "bytes": 625926921}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 330, "rep": 2, "seconds": 0.762718149999273, "requests": 137, "bytes": 681998681}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 1000, "rep": 1, "seconds": 0.35130507400026545, "requests": 137, "bytes": 76141312}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 330, "rep": 2, "seconds": 0.707521361997351, "requests": 17, "bytes": 284377088}
+{"method": "skipzfp", "size": "k8", "mode": "latency", "n": 20, "rep": 0, "seconds": 0.09808620600233553, "p90": 0.20535370420038818, "lat": [0.20418191600037972, 0.18553494400111958, 0.1814896109935944, 0.15118658499704907, 0.09009810200223001, 0.10195717200258514, 0.06581950400141068, 0.16029706499830354, 0.08351681299973279, 0.21589979800046422, 0.061180949000117835, 0.06875932699767873, 0.09421524000208592, 0.15180612100084545, 0.29036323300533695, 0.11134421999304323, 0.08946621200448135, 0.07468843099923106, 0.05897757200000342, 0.07033099599357229], "requests": 2740, "bytes": 84348160}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 1000, "rep": 2, "seconds": 1.7281505569990259, "requests": 274, "bytes": 627049773}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 1000, "rep": 0, "seconds": 0.24804780299746199, "requests": 137, "bytes": 65962410}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 1, "seconds": 0.2602056379982969, "requests": 137, "bytes": 9519269}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 10, "rep": 2, "seconds": 0.17479625000123633, "requests": 137, "bytes": 4296320}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "latency", "n": 20, "rep": 0, "seconds": 0.17529633049707627, "p90": 0.514068831895566, "lat": [0.3879850350058405, 0.46220709099725354, 0.8922980610004743, 14.767520388006233, 0.17730049300007522, 0.13488616500399075, 0.2564949469960993, 0.15587619599682512, 0.1506838119967142, 0.15081214500241913, 0.47204336199501995, 0.16812960400420707, 0.18413789599435404, 0.152204972000618, 0.12321651200181805, 0.15330337100022007, 0.3832441230042605, 0.12058513300144114, 0.27827845900174, 0.17329216799407732], "requests": 5480, "bytes": 268255416}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 0, "seconds": 0.23019156800000928, "requests": 274, "bytes": 9932111}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 100, "rep": 2, "seconds": 0.43763270800263854, "requests": 137, "bytes": 279734272}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 2, "seconds": 0.5065497010000399, "requests": 548, "bytes": 11718328}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 100, "rep": 1, "seconds": 0.0898033299963572, "requests": 17, "bytes": 3620864}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 330, "rep": 1, "seconds": 1.2858558369989623, "requests": 137, "bytes": 617386402}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 1, "rep": 2, "seconds": 0.14146440100012114, "requests": 137, "bytes": 9562501}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 330, "rep": 1, "seconds": 1.4068869600014295, "requests": 137, "bytes": 625926921}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 330, "rep": 2, "seconds": 0.9783669339958578, "requests": 137, "bytes": 625926921}
+{"method": "skipzfp", "size": "k8t", "mode": "latency", "n": 20, "rep": 2, "seconds": 0.09851140099999611, "p90": 0.21840492940027653, "lat": [0.1609222709957976, 0.0832080109976232, 0.062357859998883214, 0.08791467500122963, 0.06947993499488803, 0.1000271739976597, 1.1261293990028207, 0.10206420499889646, 0.11420599499979289, 0.0771125659957761, 0.19307069500064244, 0.12660643499839352, 0.4464130389969796, 0.06600971100124298, 0.07754667499830248, 0.12070538799889619, 0.09699562800233252, 0.07615339699987089, 0.0635393370030215, 0.11046538800292183], "requests": 2740, "bytes": 2805760}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 2, "seconds": 2.593246602002182, "requests": 137, "bytes": 617386402}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 100, "rep": 2, "seconds": 0.4463754030002747, "requests": 137, "bytes": 639690640}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 0, "seconds": 2.796833947999403, "requests": 274, "bytes": 617527238}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 10, "rep": 2, "seconds": 1.0015730110026198, "requests": 274, "bytes": 22078634}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 330, "rep": 1, "seconds": 0.3982974919999833, "requests": 137, "bytes": 28995397}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 100, "rep": 1, "seconds": 0.49872248999599833, "requests": 137, "bytes": 10142057}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 100, "rep": 2, "seconds": 0.8834549390012398, "requests": 274, "bytes": 22709602}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 10, "rep": 1, "seconds": 0.5265572849966702, "requests": 274, "bytes": 492803630}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "throughput", "n": 200, "rep": 0, "seconds": 8.813721910999448, "qps": 22.691889081547007, "requests": 27400, "bytes": 2443429719}
+{"method": "skipzfp", "size": "k8", "mode": "latency", "n": 20, "rep": 2, "seconds": 0.08344557250165963, "p90": 0.26011928120351513, "lat": [0.15838540000549983, 0.08344315500289667, 0.11194532499939669, 0.2600183430040488, 0.8674000210012309, 0.08210175300337141, 0.06647415100451326, 0.09825804299907759, 0.12389767199783819, 0.06930671500595054, 0.08275664699613117, 0.08344799000042258, 0.05230262200348079, 0.08029804100078763, 0.0998525739996694, 0.07342715499544283, 0.08295979600370629, 0.2610277249987121, 0.06477608400018653, 0.10778735400526784], "requests": 2740, "bytes": 84348160}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 2, "seconds": 0.16181159499683417, "requests": 137, "bytes": 2668352}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 330, "rep": 0, "seconds": 0.24293262099672575, "requests": 274, "bytes": 46029408}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 10, "rep": 0, "seconds": 1.766346465999959, "requests": 411, "bytes": 262704032}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 100, "rep": 0, "seconds": 0.3606877030033502, "requests": 17, "bytes": 275742720}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 1, "rep": 0, "seconds": 0.170852177994675, "requests": 137, "bytes": 9885906}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "latency", "n": 20, "rep": 1, "seconds": 0.09903971250241739, "p90": 0.32824258909968196, "lat": [0.596397107001394, 0.14084440100123174, 0.07937574300012784, 0.3203625239984831, 0.06627901500178268, 0.08499918300367426, 0.14175737800542265, 0.19645956299791578, 0.08858092300215503, 0.07811587300238898, 0.07501598499948159, 0.34268223499384476, 0.3266381840003305, 0.1022179820065503, 0.09586144299828447, 0.07881747299688868, 0.1739172769957804, 0.07468283699563472, 0.07898096399731003, 0.11244061599427368], "requests": 2740, "bytes": 17034047}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 10, "rep": 1, "seconds": 0.12151797999831615, "requests": 17, "bytes": 1253376}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 1000, "rep": 2, "seconds": 1.1318509639968397, "requests": 137, "bytes": 107524650}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 0, "seconds": 15.319049065001309, "qps": 13.05564067008117, "requests": 54800, "bytes": 1958460708}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 10, "rep": 1, "seconds": 0.24622672900295584, "requests": 274, "bytes": 13193942}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 330, "rep": 1, "seconds": 3.5736836580035742, "requests": 274, "bytes": 617527238}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 330, "rep": 2, "seconds": 2.8749419279993162, "requests": 8768, "bytes": 617386402}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 100, "rep": 2, "seconds": 1.3731708630002686, "requests": 137, "bytes": 282627712}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 1, "seconds": 0.13139688299997943, "requests": 137, "bytes": 3334600}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 10, "rep": 1, "seconds": 0.3397314679968986, "requests": 137, "bytes": 232316928}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 10, "rep": 2, "seconds": 0.27886218799540075, "requests": 274, "bytes": 12857111}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 100, "rep": 0, "seconds": 1.2077141949994257, "requests": 274, "bytes": 682073565}
+{"method": "skipzfp", "size": "k64t", "mode": "latency", "n": 20, "rep": 0, "seconds": 0.060232953503145836, "p90": 0.10942170810449174, "lat": [0.13676495100662578, 0.06929748299444327, 0.043303438993461896, 0.0452557809985592, 0.10638357000425458, 0.07033142799627967, 0.06285948000004282, 0.059559344001172576, 0.04980972799967276, 0.22488308000174584, 0.07119234700076049, 0.060906563005119096, 0.06182560599700082, 0.037535524999839254, 0.052154053999402095, 0.061967243993422017, 0.04360464100318495, 0.04542457799834665, 0.043468559997563716, 0.05807487299898639], "requests": 340, "bytes": 2785280}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 10, "rep": 2, "seconds": 0.4881432300026063, "requests": 137, "bytes": 228678208}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 330, "rep": 2, "seconds": 1.436498079005105, "requests": 274, "bytes": 617527238}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 1, "seconds": 0.22946126900205854, "requests": 137, "bytes": 9519269}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 1, "rep": 2, "seconds": 0.17704292700364022, "requests": 137, "bytes": 9562501}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 330, "rep": 1, "seconds": 0.32687652399908984, "requests": 51, "bytes": 5013504}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 1, "seconds": 0.7686975090036867, "requests": 137, "bytes": 47804468}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 1, "seconds": 0.7701076060038758, "requests": 274, "bytes": 47945304}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 100, "rep": 0, "seconds": 2.642609717993764, "requests": 137, "bytes": 616393446}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 0, "seconds": 0.13371972199820448, "requests": 137, "bytes": 9791275}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 1, "rep": 2, "seconds": 0.13313777100120205, "requests": 137, "bytes": 12172150}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 100, "rep": 1, "seconds": 0.7594604850019095, "requests": 137, "bytes": 617386402}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 330, "rep": 0, "seconds": 1.4002557519997936, "requests": 274, "bytes": 617527238}
+{"method": "zfpacc", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 2, "seconds": 8.180593417004275, "qps": 24.44810416616938, "requests": 27400, "bytes": 708017944}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 1, "seconds": 0.27515889699861873, "requests": 137, "bytes": 9519269}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 1000, "rep": 2, "seconds": 0.400584364993847, "requests": 137, "bytes": 80499008}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "throughput", "n": 200, "rep": 2, "seconds": 14.299560970997845, "qps": 13.986443388411503, "requests": 54800, "bytes": 2673617570}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 1, "rep": 0, "seconds": 0.27179579000221565, "requests": 274, "bytes": 18800126}
+{"method": "zstd", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 2, "seconds": 0.08494024600076955, "p90": 0.1389600376991439, "lat": [0.16036760599672562, 0.07408257199858781, 0.08735457799775759, 0.08346531399729429, 0.23341255300329067, 0.07672381900192704, 0.13658141899941256, 0.0630599810028798, 0.10466653800540371, 0.0694009599974379, 0.08321287499711616, 0.08577676599816186, 0.1087866829984705, 0.07624696499988204, 0.07694769900263054, 0.06731074299750617, 0.08410372600337723, 0.08992602800572058, 0.11012732300150674, 0.12408906999917235], "requests": 2740, "bytes": 192092063}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 1, "seconds": 17.00990901199839, "qps": 11.757852429364831, "requests": 54800, "bytes": 1956892203}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 1, "rep": 1, "seconds": 0.25007669100159546, "requests": 274, "bytes": 13341694}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 0, "seconds": 0.6320624629952363, "requests": 274, "bytes": 38759177}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 100, "rep": 1, "seconds": 0.2532880060025491, "requests": 137, "bytes": 4436608}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 10, "rep": 1, "seconds": 0.2585152219980955, "requests": 137, "bytes": 4287552}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 0, "seconds": 0.356771603001107, "requests": 137, "bytes": 9791275}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 1, "rep": 1, "seconds": 0.4276656509973691, "requests": 137, "bytes": 4217408}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 10, "rep": 1, "seconds": 0.24812283399660373, "requests": 137, "bytes": 1262592}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 330, "rep": 2, "seconds": 0.13676167000085115, "requests": 51, "bytes": 7380992}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 0, "seconds": 11.055004155998176, "requests": 8768, "bytes": 617386402}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 10, "rep": 1, "seconds": 0.8279362210014369, "requests": 137, "bytes": 12071090}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 2, "seconds": 0.7687050940003246, "requests": 137, "bytes": 9291177}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 2, "seconds": 14.321036367997294, "qps": 13.965469737017973, "requests": 54800, "bytes": 1962139247}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "throughput", "n": 200, "rep": 2, "seconds": 11.076119747005578, "qps": 18.056865090689353, "requests": 27400, "bytes": 167742091}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 330, "rep": 1, "seconds": 0.6708224800022435, "requests": 17, "bytes": 283402240}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 330, "rep": 0, "seconds": 0.6711103530033142, "requests": 274, "bytes": 699795301}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 1000, "rep": 2, "seconds": 1.0121273250042577, "requests": 274, "bytes": 704045065}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 10, "rep": 2, "seconds": 0.4645699999964563, "requests": 548, "bytes": 309585841}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 100, "rep": 0, "seconds": 0.4381250029982766, "requests": 137, "bytes": 40008384}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "latency", "n": 20, "rep": 1, "seconds": 0.16158365050068824, "p90": 0.22157747599776492, "lat": [0.1831673829947249, 0.16324837399588432, 0.13000383299367968, 0.11606131299777189, 0.12830608999502147, 0.1477357870026026, 0.11699230600061128, 0.10869254100543913, 0.19251646799966693, 0.11991761600074824, 0.21102018099918496, 0.27149137699598214, 0.16116995100310305, 0.2933788860027562, 0.16199734999827342, 0.1507180979970144, 0.15338094699836802, 0.21603148699796293, 0.17382635999820195, 0.18647553399932804], "requests": 5480, "bytes": 376182287}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 100, "rep": 2, "seconds": 2.0513569690010627, "requests": 6165, "bytes": 160224040}
+{"method": "skipzfp", "size": "k64t", "mode": "latency", "n": 20, "rep": 2, "seconds": 0.06960758149944013, "p90": 0.13183006360559377, "lat": [0.09772458000225015, 0.09349558199755847, 0.08210757099732291, 0.04433337800583104, 0.06741646100272192, 0.07578533999912906, 0.03635167899483349, 0.04663534700375749, 0.060320552001940086, 0.11308102999464609, 0.0709384340007091, 0.06827672899817117, 0.04441576799581526, 0.05819639400579035, 0.13064320900593884, 0.14251175500248792, 0.3204669999977341, 0.04933307899773354, 0.04637704900233075, 0.08814141400216613], "requests": 340, "bytes": 2785280}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 100, "rep": 0, "seconds": 0.4688852359977318, "requests": 137, "bytes": 664116153}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 1, "rep": 2, "seconds": 0.6141109449963551, "requests": 137, "bytes": 3496080}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 1000, "rep": 1, "seconds": 0.9928165410019574, "requests": 137, "bytes": 685750897}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 1, "rep": 1, "seconds": 0.5976520240001264, "requests": 274, "bytes": 18790200}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 330, "rep": 1, "seconds": 0.45437939800467575, "requests": 137, "bytes": 69021696}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 2, "seconds": 0.9113655960027245, "requests": 137, "bytes": 2668352}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 10, "rep": 0, "seconds": 1.0536146279991954, "requests": 1370, "bytes": 33919656}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 1, "rep": 2, "seconds": 0.24573219600279117, "requests": 274, "bytes": 18744184}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 1, "seconds": 0.3276690940037952, "requests": 548, "bytes": 13608312}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 1, "rep": 0, "seconds": 0.16661632899922552, "requests": 137, "bytes": 12586250}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 0, "seconds": 0.1212465839998913, "requests": 137, "bytes": 3944240}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 1, "rep": 0, "seconds": 0.21035460099665215, "requests": 137, "bytes": 140288}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 1000, "rep": 0, "seconds": 1.7150508760023513, "requests": 274, "bytes": 627049773}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 1000, "rep": 0, "seconds": 0.36795444499875885, "requests": 137, "bytes": 80507776}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 10, "rep": 0, "seconds": 0.33151986000302713, "requests": 137, "bytes": 265986048}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 2, "seconds": 0.3326769810009864, "requests": 137, "bytes": 9291177}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 330, "rep": 0, "seconds": 0.6669023750000633, "requests": 17, "bytes": 282984448}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 1000, "rep": 1, "seconds": 0.36996020800143015, "requests": 137, "bytes": 73510912}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 1, "rep": 0, "seconds": 0.15510449599969434, "requests": 137, "bytes": 4217408}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 1, "rep": 2, "seconds": 0.24985110000125133, "requests": 274, "bytes": 12857111}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 1, "rep": 0, "seconds": 0.0757159800050431, "requests": 17, "bytes": 139264}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 0, "seconds": 0.3685563129984075, "requests": 137, "bytes": 38618341}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 1, "rep": 1, "seconds": 0.1698657520028064, "requests": 137, "bytes": 140288}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 100, "rep": 2, "seconds": 0.349498928997491, "requests": 34, "bytes": 263208960}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "throughput", "n": 200, "rep": 1, "seconds": 7.414850320004916, "qps": 26.972897815672617, "requests": 27400, "bytes": 167593235}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 1000, "rep": 2, "seconds": 1.4749380040011602, "requests": 137, "bytes": 286748672}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 330, "rep": 2, "seconds": 0.786140208998404, "requests": 137, "bytes": 287257216}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 1, "rep": 2, "seconds": 0.1478416850004578, "requests": 137, "bytes": 786772}
+{"method": "skipzfp", "size": "k64t", "mode": "throughput", "n": 200, "rep": 1, "seconds": 2.005577905001701, "qps": 99.7218804122348, "requests": 3400, "bytes": 27852800}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "throughput", "n": 200, "rep": 1, "seconds": 14.891869281993422, "qps": 13.430147432319393, "requests": 54800, "bytes": 2667762043}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 1, "rep": 2, "seconds": 0.1622206100000767, "requests": 17, "bytes": 139264}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 0, "seconds": 0.11641491099726409, "requests": 137, "bytes": 9791275}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 100, "rep": 2, "seconds": 2.0207769479966373, "requests": 6165, "bytes": 435070443}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 0, "seconds": 0.21826098799647298, "requests": 274, "bytes": 19404923}
+{"method": "skipzfp", "size": "k64t", "mode": "throughput", "n": 200, "rep": 0, "seconds": 1.4282272900018143, "qps": 140.03373370617078, "requests": 3400, "bytes": 27852800}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 1, "rep": 2, "seconds": 0.14172396899812156, "requests": 137, "bytes": 4217408}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 10, "rep": 1, "seconds": 0.686616236998816, "requests": 1233, "bytes": 31930392}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 1, "seconds": 0.12753144700400298, "requests": 137, "bytes": 3334600}
+{"method": "zstd", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 0, "seconds": 0.22477910550151137, "p90": 0.5431910847961263, "lat": [0.11714106499857735, 0.5683740549939102, 0.31048246700083837, 0.06222757800424006, 0.06855281699972693, 0.19050194100418594, 0.07723370700114174, 0.34880739400250604, 0.10866001899557887, 0.2831824599998072, 0.35432530600519385, 0.33963558400137117, 0.20883990599395474, 0.11276436500338605, 0.2201344360000803, 0.5102164799973252, 0.22942377500294242, 0.5403929769963725, 0.1759331569992355, 0.6715561239980161], "requests": 2740, "bytes": 192446452}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "throughput", "n": 200, "rep": 2, "seconds": 17.250399086005928, "qps": 11.593934667995384, "requests": 54800, "bytes": 3759224491}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 1000, "rep": 0, "seconds": 1.0628109770041192, "requests": 137, "bytes": 72205639}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 330, "rep": 0, "seconds": 3.192482418999134, "requests": 8768, "bytes": 617386402}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 2, "seconds": 3.164917122994666, "requests": 137, "bytes": 142971754}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 1000, "rep": 1, "seconds": 0.43087662100151647, "requests": 274, "bytes": 66662070}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 1000, "rep": 2, "seconds": 0.37596325400227215, "requests": 137, "bytes": 75895808}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 1, "rep": 2, "seconds": 0.1892663770049694, "requests": 274, "bytes": 18783515}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 100, "rep": 0, "seconds": 0.18608461000258103, "requests": 137, "bytes": 34089984}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 330, "rep": 2, "seconds": 3.0882112179970136, "requests": 8768, "bytes": 224643104}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 1, "rep": 2, "seconds": 0.15496180499758339, "requests": 137, "bytes": 140288}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 1000, "rep": 0, "seconds": 1.4645563189988025, "requests": 137, "bytes": 287169536}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 0, "seconds": 9.36266873400018, "qps": 21.361430771731513, "requests": 27400, "bytes": 1930293508}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 1, "rep": 0, "seconds": 0.27041769600327825, "requests": 137, "bytes": 9885906}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 100, "rep": 0, "seconds": 2.235474664004869, "requests": 6987, "bytes": 492263597}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 100, "rep": 2, "seconds": 0.206522403001145, "requests": 137, "bytes": 11734259}
+{"method": "skipzfp", "size": "k8t", "mode": "throughput", "n": 200, "rep": 0, "seconds": 7.204448805998254, "qps": 27.760624773054772, "requests": 27400, "bytes": 28057600}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 330, "rep": 1, "seconds": 0.694176074997813, "requests": 274, "bytes": 699977614}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 1, "rep": 2, "seconds": 0.7954633269982878, "requests": 274, "bytes": 13295002}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 1000, "rep": 0, "seconds": 1.5759515660029138, "requests": 17, "bytes": 285073408}
+{"method": "skipzfp", "size": "k64t", "mode": "throughput", "n": 200, "rep": 2, "seconds": 1.2479771270009223, "qps": 160.25934744543775, "requests": 3400, "bytes": 27852800}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 330, "rep": 2, "seconds": 0.7569777509997948, "requests": 137, "bytes": 286468096}
+{"method": "skipzfp", "size": "k8t", "mode": "throughput", "n": 200, "rep": 2, "seconds": 6.536071649003134, "qps": 30.599419764699725, "requests": 27400, "bytes": 28057600}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 1, "rep": 0, "seconds": 0.133837051995215, "requests": 137, "bytes": 842714}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 10, "rep": 1, "seconds": 0.9311579749992234, "requests": 274, "bytes": 523908704}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 330, "rep": 0, "seconds": 0.7461732759984443, "requests": 137, "bytes": 287169536}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 0, "seconds": 0.24081316700176103, "requests": 274, "bytes": 7565640}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 330, "rep": 0, "seconds": 0.2282251369979349, "requests": 137, "bytes": 40218816}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 10, "rep": 0, "seconds": 0.123891724004352, "requests": 137, "bytes": 140288}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 1, "rep": 0, "seconds": 0.15492188800271833, "requests": 137, "bytes": 140288}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 1000, "rep": 1, "seconds": 1.4679225380023126, "requests": 137, "bytes": 287283520}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 1000, "rep": 2, "seconds": 0.2837118770039524, "requests": 51, "bytes": 19914752}
+{"method": "skipzfp", "size": "k8t", "mode": "latency", "n": 20, "rep": 0, "seconds": 0.08752656600336195, "p90": 0.1178201120026643, "lat": [0.15307784600008745, 0.08129750299849547, 0.09214527199947042, 0.09145092599646887, 0.09476254099718062, 0.9347779500021716, 0.09178359100042144, 0.11390258600295056, 0.06383706799533684, 0.0912931179991574, 0.06313257999863708, 0.08997204399929615, 0.06565029299963498, 0.08983022900065407, 0.06833452599676093, 0.05622047300130362, 0.08522290300606983, 0.08259750999422977, 0.0730454859949532, 0.06115918299474288], "requests": 2740, "bytes": 2805760}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 1, "seconds": 0.259432465005375, "requests": 411, "bytes": 28699458}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 1, "seconds": 0.1444952279998688, "requests": 137, "bytes": 9519269}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 1, "rep": 1, "seconds": 0.061097378995327745, "requests": 17, "bytes": 139264}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 2, "seconds": 0.08843766399877495, "p90": 0.1558892131994071, "lat": [0.16037882900127443, 0.13025360100436956, 0.06547767300071428, 0.08289297900046222, 0.15539036699919961, 0.1494110970015754, 0.10532023399719037, 0.06972119599959115, 0.09398234899708768, 0.08002256599866087, 0.0818996580055682, 0.14460832099575782, 0.07081456800369779, 0.12223252099647652, 0.06916526400164003, 0.3216223400013405, 0.07717362300172681, 0.12794889199722093, 0.06700104100309545, 0.0786587859984138], "requests": 2740, "bytes": 192092063}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 1, "seconds": 0.2457903980030096, "requests": 274, "bytes": 9660105}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 10, "rep": 2, "seconds": 0.4758016259947908, "requests": 548, "bytes": 316212134}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 1, "rep": 0, "seconds": 0.40281426799629116, "requests": 137, "bytes": 4217408}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 1000, "rep": 2, "seconds": 0.46893839499534806, "requests": 274, "bytes": 119431645}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 330, "rep": 2, "seconds": 0.443209876997571, "requests": 137, "bytes": 100376154}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 100, "rep": 0, "seconds": 0.9570294320001267, "requests": 274, "bytes": 617516298}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 2, "seconds": 0.8360730530039291, "requests": 274, "bytes": 133826639}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 100, "rep": 2, "seconds": 0.25806440300220856, "requests": 274, "bytes": 12857111}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 330, "rep": 0, "seconds": 1.3301389640037087, "requests": 137, "bytes": 617386402}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 100, "rep": 0, "seconds": 0.20280925399856642, "requests": 137, "bytes": 29906384}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 10, "rep": 0, "seconds": 0.756593726000574, "requests": 274, "bytes": 13847395}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 2, "seconds": 0.49631479600066086, "requests": 274, "bytes": 9432013}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 1000, "rep": 2, "seconds": 1.4563409389957087, "requests": 137, "bytes": 287274752}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 100, "rep": 0, "seconds": 0.8288684389990522, "requests": 274, "bytes": 608194584}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 2, "seconds": 0.48453679399972316, "requests": 822, "bytes": 56621805}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 10, "rep": 1, "seconds": 0.3631737969990354, "requests": 137, "bytes": 567918555}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 10, "rep": 2, "seconds": 0.15189607300271746, "requests": 137, "bytes": 1402880}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "latency", "n": 20, "rep": 0, "seconds": 0.08866209050029283, "p90": 0.13039035480396707, "lat": [0.1284649170047487, 0.11174605999985943, 0.1093530349971843, 0.10824271700403187, 0.07130359300208511, 0.1648921559972223, 0.1054731449985411, 0.06726519900257699, 0.14771929499693215, 0.12252821800211677, 0.09307823899871437, 0.08488751699769637, 0.08074993899936089, 0.06646924300002865, 0.08959497199975885, 0.08772920900082681, 0.0822222380011226, 0.07873123199533438, 0.06408193199604284, 0.07567932499659946], "requests": 2740, "bytes": 16730630}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 1000, "rep": 1, "seconds": 1.6646027259994298, "requests": 274, "bytes": 627049773}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 100, "rep": 0, "seconds": 0.45298607800214086, "requests": 137, "bytes": 282504960}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 1, "rep": 0, "seconds": 0.16740358599781757, "requests": 137, "bytes": 12724543}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 2, "seconds": 0.16665915599878645, "requests": 137, "bytes": 2668352}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 1, "seconds": 9.22453784100071, "qps": 21.681303003718103, "requests": 27400, "bytes": 1928725003}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 1, "rep": 0, "seconds": 0.5151158129956457, "requests": 274, "bytes": 13709102}
+{"method": "skipzfp", "size": "k64t", "mode": "random", "n": 10, "rep": 0, "seconds": 0.28128263899998274, "requests": 119, "bytes": 24928256}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "throughput", "n": 200, "rep": 0, "seconds": 7.402629734002403, "qps": 27.017425858994756, "requests": 27400, "bytes": 167376028}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 330, "rep": 2, "seconds": 1.6092174369987333, "requests": 274, "bytes": 627049773}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 100, "rep": 2, "seconds": 0.7572837219995563, "requests": 137, "bytes": 598758995}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 1, "rep": 2, "seconds": 0.18889120200037723, "requests": 137, "bytes": 11734259}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 1, "rep": 2, "seconds": 0.1611398660024861, "requests": 137, "bytes": 826103}
+{"method": "zstd", "size": "64x16x32", "mode": "cluster", "n": 10, "rep": 2, "seconds": 0.12371328299923334, "requests": 137, "bytes": 9291177}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 10, "rep": 0, "seconds": 0.16363724999973783, "requests": 137, "bytes": 4217408}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 0, "seconds": 0.31766803999926196, "requests": 274, "bytes": 7565640}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 1, "rep": 0, "seconds": 0.17175288700673264, "requests": 137, "bytes": 845278}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 100, "rep": 1, "seconds": 2.436071987001924, "requests": 7261, "bytes": 511000056}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 330, "rep": 1, "seconds": 2.8166045489997487, "requests": 8768, "bytes": 617386402}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 1000, "rep": 1, "seconds": 1.075528970999585, "requests": 137, "bytes": 53260289}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "cluster", "n": 330, "rep": 0, "seconds": 0.4452166789997136, "requests": 137, "bytes": 34740162}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 10, "rep": 1, "seconds": 1.6876099410001189, "requests": 274, "bytes": 585875967}
+{"method": "skipzfp", "size": "k8", "mode": "latency", "n": 20, "rep": 1, "seconds": 0.07983327599868062, "p90": 0.1547812656026509, "lat": [0.14934513500338653, 0.07556502499937778, 0.0674456030028523, 0.06665046599664493, 0.20370644099602941, 0.060746917995857075, 0.09631698999874061, 0.08927354399929754, 0.06362807099503698, 0.06363675499596866, 0.11759685700235423, 0.06649001099867746, 0.07246565699460916, 0.07839958900149213, 0.08126696299586911, 0.11517269999603741, 0.12360583500412758, 0.09555306699621724, 2.5131787689970224, 0.07453767999686534], "requests": 2740, "bytes": 84348160}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 1, "rep": 2, "seconds": 0.19529947500268463, "requests": 274, "bytes": 9703337}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 330, "rep": 0, "seconds": 0.1438581830007024, "requests": 34, "bytes": 5709824}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 2, "seconds": 0.12116898399835918, "p90": 0.19854820309992646, "lat": [0.20194111399905523, 0.13507213699631393, 0.18629970899928594, 0.12541358599992236, 0.22517661800520727, 0.10462561199528864, 0.10494923400256084, 0.08775038300518645, 0.09738447099516634, 0.116924381996796, 0.19817121300002327, 0.18089916700409958, 0.0970588139971369, 0.10848229299881496, 0.15941930299595697, 0.1603417329970398, 0.08708292799565243, 0.08394073200179264, 0.09859748999588192, 0.12574907499947585], "requests": 5480, "bytes": 194908783}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 1000, "rep": 0, "seconds": 1.1735059499987983, "requests": 274, "bytes": 73328491}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 100, "rep": 0, "seconds": 0.7540229310034192, "requests": 137, "bytes": 608053748}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 100, "rep": 1, "seconds": 0.4853737480007112, "requests": 137, "bytes": 682708406}
+{"method": "zstd", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 0, "seconds": 8.434424200000649, "qps": 23.71234778539887, "requests": 27400, "bytes": 1930293508}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 100, "rep": 1, "seconds": 0.12411510899983114, "requests": 137, "bytes": 3647488}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 330, "rep": 0, "seconds": 0.3673992129988619, "requests": 137, "bytes": 28071996}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 2, "seconds": 0.25232124399917666, "requests": 137, "bytes": 9291177}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 330, "rep": 0, "seconds": 0.2508095540033537, "requests": 137, "bytes": 37456896}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "throughput", "n": 200, "rep": 0, "seconds": 14.220615097998234, "qps": 14.064089255052899, "requests": 54800, "bytes": 2668000119}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 1000, "rep": 2, "seconds": 0.9833836280013202, "requests": 137, "bytes": 686087653}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 100, "rep": 0, "seconds": 0.28032538700063014, "requests": 274, "bytes": 31029236}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 1, "seconds": 4.284324715001276, "requests": 8768, "bytes": 617386402}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 330, "rep": 2, "seconds": 0.5322899630045868, "requests": 274, "bytes": 101499006}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 100, "rep": 2, "seconds": 0.7661850029980997, "requests": 274, "bytes": 596253074}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 1, "seconds": 2.723887404994457, "requests": 8768, "bytes": 224643104}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 2, "seconds": 0.16452979300083825, "requests": 274, "bytes": 9432013}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 1, "rep": 1, "seconds": 0.14261396400252124, "requests": 137, "bytes": 4217408}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 10, "rep": 1, "seconds": 1.0880249709953205, "requests": 137, "bytes": 522785852}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 1000, "rep": 1, "seconds": 1.171707929999684, "requests": 274, "bytes": 54383141}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 10, "rep": 0, "seconds": 0.14262365300237434, "requests": 137, "bytes": 845278}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 330, "rep": 0, "seconds": 1.337945455998124, "requests": 137, "bytes": 681837889}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 1, "rep": 1, "seconds": 0.5138545709996833, "requests": 137, "bytes": 12218842}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 10, "rep": 0, "seconds": 0.3392163239986985, "requests": 411, "bytes": 284533106}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "throughput", "n": 200, "rep": 0, "seconds": 16.99450203000015, "qps": 11.768511936798317, "requests": 54800, "bytes": 3758858428}
+{"method": "zstd", "size": "64x16x32", "mode": "random", "n": 10, "rep": 2, "seconds": 0.7870252490029088, "requests": 1370, "bytes": 95691086}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 100, "rep": 0, "seconds": 0.18374545300321188, "requests": 137, "bytes": 18751174}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 2, "seconds": 8.518116113998985, "qps": 23.479370006627715, "requests": 27400, "bytes": 1933972047}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 1000, "rep": 0, "seconds": 0.9902660389998346, "requests": 137, "bytes": 686069191}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 100, "rep": 2, "seconds": 1.3276931360014714, "requests": 274, "bytes": 657648052}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 10, "rep": 2, "seconds": 0.34523961399827385, "requests": 137, "bytes": 224601088}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 100, "rep": 0, "seconds": 0.41795731500315014, "requests": 274, "bytes": 36708586}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "latency", "n": 20, "rep": 2, "seconds": 0.1948409754986642, "p90": 0.384785717799241, "lat": [0.3653917179981363, 0.3835891109993099, 0.2013111359992763, 0.1591466620011488, 0.0932183749973774, 0.3988021579934866, 0.20400599300046451, 0.318095620998065, 0.2980254829963087, 0.39555517899862025, 0.19834782999532763, 0.19133412100200076, 0.13451997200172627, 0.12854173199593788, 0.0871492730002501, 0.08972271300444845, 0.10484865800390253, 0.25216822599759325, 0.16082944499794394, 0.15827552800328704], "requests": 2740, "bytes": 243155051}
+{"method": "zstd", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 1, "seconds": 8.831957234993752, "qps": 22.645037184687126, "requests": 27400, "bytes": 1928725003}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 330, "rep": 1, "seconds": 0.7379882919994998, "requests": 137, "bytes": 285486080}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 0, "seconds": 3.5560971340019023, "requests": 137, "bytes": 617386402}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 330, "rep": 2, "seconds": 0.22094169200136093, "requests": 137, "bytes": 89118940}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 1000, "rep": 2, "seconds": 1.1613358159956988, "requests": 274, "bytes": 108647502}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 100, "rep": 0, "seconds": 0.09613112599618034, "requests": 34, "bytes": 1949696}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "random", "n": 1000, "rep": 0, "seconds": 2.2922114789980697, "requests": 274, "bytes": 704026603}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 100, "rep": 1, "seconds": 0.2931968289994984, "requests": 274, "bytes": 9660105}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 0, "seconds": 2.667694552001194, "requests": 8768, "bytes": 224643104}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 1, "seconds": 0.10980366549847531, "p90": 0.5142464822994953, "lat": [0.5291228190035326, 0.1046017100015888, 0.07380745800037403, 0.5977544109991868, 0.11312581800302723, 0.07032524600072065, 0.11739596400002483, 0.07528598999488167, 0.06954211800621124, 0.23566065300110495, 0.10496904199681012, 0.060052301007090136, 0.10648151299392339, 0.1823344160002307, 0.1771386899999925, 0.08074810600373894, 0.09674710700346623, 0.5125935559990467, 0.1243687329988461, 0.18434252100269077], "requests": 2740, "bytes": 194042256}
+{"method": "zfpacc", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 0, "seconds": 0.07682537599976058, "p90": 0.3441200891989868, "lat": [0.6082962180007598, 0.32512541599862743, 0.10817731799761532, 0.07869265499903122, 0.11308166399976471, 0.1412862680008402, 0.5150721480022185, 0.08473255100398092, 0.14458393499808153, 0.06626850300381193, 0.05801148500177078, 0.07495809700048994, 0.06443089099775534, 0.05427864699595375, 0.06001186499634059, 0.054553032998228446, 0.11832521500036819, 0.046919576001528185, 0.07210026500251843, 0.06027993200405035], "requests": 2740, "bytes": 69288296}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 330, "rep": 2, "seconds": 0.3401278640012606, "requests": 274, "bytes": 107076352}
+{"method": "zfpacc", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 0, "seconds": 7.872136540994688, "qps": 25.40606339314446, "requests": 27400, "bytes": 702487400}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 100, "rep": 2, "seconds": 0.2164698929991573, "requests": 137, "bytes": 4752190}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 1, "rep": 2, "seconds": 0.09837997699651169, "requests": 17, "bytes": 139264}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 0, "seconds": 0.8381681020036922, "requests": 274, "bytes": 38759177}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 0, "seconds": 0.1945185369986575, "requests": 137, "bytes": 3944240}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "cluster", "n": 10, "rep": 1, "seconds": 0.10388565799803473, "requests": 137, "bytes": 1992703}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 1000, "rep": 1, "seconds": 0.27488179100328125, "requests": 51, "bytes": 12951552}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 1, "rep": 0, "seconds": 0.20425968900235603, "requests": 274, "bytes": 10026742}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 100, "rep": 0, "seconds": 2.199161857002764, "requests": 6987, "bytes": 178814928}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "random", "n": 330, "rep": 2, "seconds": 2.335796000996197, "requests": 137, "bytes": 617386402}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 330, "rep": 1, "seconds": 1.083229472002131, "requests": 274, "bytes": 627049773}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 1000, "rep": 0, "seconds": 1.4273019550018944, "requests": 137, "bytes": 287301056}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 10, "rep": 2, "seconds": 0.4994381240030634, "requests": 411, "bytes": 298254722}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 0, "seconds": 0.7366887329990277, "requests": 137, "bytes": 38618341}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 10, "rep": 1, "seconds": 0.6354048490029527, "requests": 137, "bytes": 233369088}
+{"method": "skipzfp", "size": "k8", "mode": "throughput", "n": 200, "rep": 0, "seconds": 6.998186800003168, "qps": 28.578831305261737, "requests": 27400, "bytes": 843481600}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 330, "rep": 1, "seconds": 0.7364592730009463, "requests": 137, "bytes": 287195840}
+{"method": "zshard_cold", "size": "16x4x4", "mode": "cluster", "n": 10, "rep": 1, "seconds": 0.16430668600514764, "requests": 274, "bytes": 19950115}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 1000, "rep": 1, "seconds": 1.4482880430005025, "requests": 137, "bytes": 286888960}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 100, "rep": 1, "seconds": 0.6540133689995855, "requests": 137, "bytes": 625926921}
+{"method": "zfpacc", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 0, "seconds": 0.6819072299986146, "requests": 822, "bytes": 23658872}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 1000, "rep": 0, "seconds": 0.45423234200279694, "requests": 51, "bytes": 19775488}
+{"method": "zfpacc", "size": "64x16x32", "mode": "random", "n": 1000, "rep": 2, "seconds": 2.8062203020017478, "requests": 8768, "bytes": 224643104}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 1, "rep": 1, "seconds": 0.21740476199920522, "requests": 274, "bytes": 9871641}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 330, "rep": 2, "seconds": 0.890094231996045, "requests": 137, "bytes": 133685803}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 10, "rep": 0, "seconds": 0.2990816610035836, "requests": 137, "bytes": 269142528}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "throughput", "n": 200, "rep": 1, "seconds": 8.70544797799812, "qps": 22.974119253308253, "requests": 27400, "bytes": 2443191643}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 1, "rep": 0, "seconds": 0.2003969209981733, "requests": 274, "bytes": 9932111}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "cluster", "n": 100, "rep": 1, "seconds": 0.6789373630017508, "requests": 274, "bytes": 18024412}
+{"method": "skipzfp", "size": "k8", "mode": "random", "n": 100, "rep": 1, "seconds": 0.4463434130011592, "requests": 137, "bytes": 287134464}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 2, "seconds": 2.2161900529972627, "requests": 274, "bytes": 143112590}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 1, "rep": 1, "seconds": 0.11378848999447655, "requests": 137, "bytes": 140288}
+{"method": "zstd", "size": "64x16x32", "mode": "throughput", "n": 200, "rep": 2, "seconds": 8.798734249998233, "qps": 22.730542179977782, "requests": 27400, "bytes": 1933972047}
+{"method": "zshard_cold", "size": "16x16x16", "mode": "random", "n": 100, "rep": 1, "seconds": 0.740517923994048, "requests": 274, "bytes": 627049773}
+{"method": "zshard_warm", "size": "64x16x32", "mode": "cluster", "n": 1000, "rep": 0, "seconds": 2.3815088830015156, "requests": 137, "bytes": 68777270}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 10, "rep": 2, "seconds": 0.48002644300140673, "requests": 333, "bytes": 508297420}
+{"method": "zshard_cold", "size": "64x16x32", "mode": "random", "n": 100, "rep": 1, "seconds": 0.9596716400046716, "requests": 274, "bytes": 617527238}
+{"method": "zshard_warm", "size": "16x4x4", "mode": "random", "n": 10, "rep": 0, "seconds": 0.46056342600058997, "requests": 274, "bytes": 266575694}
+{"method": "skipzfp", "size": "k8t", "mode": "random", "n": 1, "rep": 2, "seconds": 0.1526783119988977, "requests": 137, "bytes": 140288}
+{"method": "zfpacc", "size": "64x16x32", "mode": "latency", "n": 20, "rep": 1, "seconds": 0.08263283300038893, "p90": 0.12865855699856193, "lat": [0.18367335200309753, 0.08001535900257295, 0.0808392909966642, 0.08069181199971354, 0.1113919999988866, 0.087614248994214, 0.08185592200607061, 0.12254580199805787, 0.0548438059995533, 0.11923260099865729, 0.0807562290065107, 0.19492273299692897, 0.05057409599976381, 0.11977533099707216, 0.07710329099791124, 0.08340974399470724, 0.06530475299950922, 0.08942601399758132, 0.06048548399849096, 0.09536291800031904], "requests": 2740, "bytes": 73403352}
+{"method": "skipzfp", "size": "k8", "mode": "cluster", "n": 330, "rep": 2, "seconds": 0.43331113000022015, "requests": 137, "bytes": 75851968}
+{"method": "skipzfp", "size": "k64t", "mode": "cluster", "n": 100, "rep": 2, "seconds": 0.07851529600156937, "requests": 17, "bytes": 3620864}
+{"method": "zshard_warm", "size": "16x16x16", "mode": "random", "n": 330, "rep": 0, "seconds": 0.9674015790005797, "requests": 137, "bytes": 625926921}
+{"method": "skipzfp", "size": "k8t", "mode": "cluster", "n": 330, "rep": 2, "seconds": 0.26652174800256034, "requests": 137, "bytes": 68881408}
