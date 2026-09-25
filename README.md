@@ -22,11 +22,8 @@ skip them without reading them, and decode only the blocks that might.
   </picture>
 </p>
 
-<sub>Counting values above a threshold in ten years of hourly ERA5 temperature (11.5 GB of
-float32) on Google Cloud Storage. "Reading the whole array" is a zstd full scan. The grey
-line is, at each selectivity, the fastest of six baselines (zstd or ZFP chunks with zone
-maps, and sharded Zarr), so the gap between the lines is SkipZFP's gain over the best
-alternative: 1.2–1.8x from 1% to 50%.</sub>
+<sub>Threshold queries (count of x > T) on ten years of hourly ERA5 temperature, 11.5 GB, read
+from Google Cloud Storage.</sub>
 
 - **Reads only what can match.** Fixed-rate blocks sit at computable offsets, so the
   planner turns the surviving blocks straight into byte-range requests.

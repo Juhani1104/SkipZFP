@@ -28,15 +28,33 @@ for f in sorted(Path.home().glob(".cache/tectonic/bundles/data/*/LinBiolinum_R*.
 
 THEMES = {
     "light": dict(
-        ours="#2272dc", base="#747d87", ink="#1f2328", muted="#59636e", grid="#d8dee4"
+        ours="#2272dc",
+        base="#747d87",
+        ink="#1f2328",
+        muted="#59636e",
+        grid="#d8dee4",
+        zstd_zm="#e0701f",
+        zshard_izm="#1a9a82",
+        zfpacc_zm="#8250df",
     ),
     "dark": dict(
-        ours="#4493f8", base="#848d97", ink="#f0f6fc", muted="#9198a1", grid="#30363d"
+        ours="#4493f8",
+        base="#848d97",
+        ink="#f0f6fc",
+        muted="#9198a1",
+        grid="#30363d",
+        zstd_zm="#db7630",
+        zshard_izm="#2ba48b",
+        zfpacc_zm="#a371f7",
     ),
 }
 SELECTIVITIES = [0.001, 0.01, 0.05, 0.1, 0.2, 0.5]
 LABELS = ["0.1%", "1%", "5%", "10%", "20%", "50%"]
-BASELINES = ("zstd_zm", "zfpacc_zm", "zshard_izm")
+BASELINES = {
+    "zstd_zm": "zstd + zone map",
+    "zfpacc_zm": "ZFP + zone map",
+    "zshard_izm": "Zarr sharding",
+}
 
 
 def speedups(rows, var):
@@ -46,7 +64,7 @@ def speedups(rows, var):
         )
 
     full = med(var=var, method="fullscan_zstd")
-    ours, best = [], []
+    ours, best, winner = [], [], []
     for s in SELECTIVITIES:
         ours.append(full / med(var=var, method="skipzfp", size="k8t", sel=s))
         configs = {
@@ -54,13 +72,13 @@ def speedups(rows, var):
             for r in rows
             if r["var"] == var and r["sel"] == s and r["method"] in BASELINES
         }
-        best.append(
-            full / min(med(var=var, method=m, size=z, sel=s) for m, z in configs)
-        )
-    return np.array(ours), np.array(best)
+        t, m = min((med(var=var, method=m, size=z, sel=s), m) for m, z in configs)
+        best.append(full / t)
+        winner.append(m)
+    return np.array(ours), np.array(best), winner
 
 
-def figure(t, ours, best):
+def figure(t, ours, best, winner):
     mpl.rcParams.update(
         {
             "font.family": FONT,
@@ -88,6 +106,13 @@ def figure(t, ours, best):
     ax.plot(x, best, color=t["base"], lw=1.6, solid_capstyle="round")
     ax.plot(x, ours, color=t["ours"], lw=2.6, solid_capstyle="round")
     ax.scatter(x, ours, s=22, color=t["ours"], zorder=3, linewidths=0)
+    ax.scatter(x, best, s=34, color=[t[w] for w in winner], zorder=3, linewidths=0)
+    families = [m for m in BASELINES if m in winner]
+    ax.text(3.55, 4.15, "fastest baseline", color=t["muted"], va="center")
+    for k, m in enumerate(families):
+        y = 3.72 - 0.4 * k
+        ax.scatter([3.65], [y], s=34, color=t[m], linewidths=0)
+        ax.text(3.82, y, BASELINES[m], color=t["ink"], va="center")
     ax.axhline(1, color=t["grid"], lw=1, zorder=0)
     ax.set_xticks(x, LABELS)
     ax.set_xlim(-0.25, len(x) + 0.9)
@@ -120,9 +145,9 @@ def figure(t, ours, best):
 
 def main():
     rows = [json.loads(line) for line in open(RES)]
-    ours, best = speedups(rows, "t2m")
+    ours, best, winner = speedups(rows, "t2m")
     for theme, t in THEMES.items():
-        fig = figure(t, ours, best)
+        fig = figure(t, ours, best, winner)
         path = OUT / f"speedup-{theme}.svg"
         fig.savefig(path, format="svg", metadata={"Date": None})
         plt.close(fig)
