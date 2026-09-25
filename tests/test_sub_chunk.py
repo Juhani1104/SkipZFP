@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
 import zarr
-from helpers import LAYERS, SHAPE, make_array, smooth_field
 
 from skipzfp import codec, query
+
+from helpers import LAYERS, SHAPE, make_array, smooth_field
 
 SUB_CASES = [
     ((64, 32, 64), {}),

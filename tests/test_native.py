@@ -2,9 +2,10 @@ import ctypes
 
 import numpy as np
 import pytest
-from helpers import SHAPE, smooth_field, true_blocks
 
 from skipzfp import _native, codec
+
+from helpers import SHAPE, smooth_field, true_blocks
 
 P = ctypes.c_void_p
 SZ = ctypes.c_size_t

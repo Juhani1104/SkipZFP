@@ -1,9 +1,10 @@
-numpy==2.5.3
-zarr==3.4.0
+numpy==2.4.6
+zarr==3.1.6
 zfpy==1.0.1
-numcodecs==0.17.0
+numcodecs==0.16.5
 obstore==0.11.1
-scipy==1.18.1
-gstools==1.7.0
 matplotlib==3.11.2
 pytest==9.1.1
+xarray==2026.7.0
+dask==2026.8.0
+gcsfs==2026.8.1

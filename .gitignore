@@ -4,4 +4,10 @@ build/
 .venv/
 __pycache__/
 skipzfp.egg-info/
-.ruff_cache/.coverage
+.ruff_cache/
+.coverage
+experiments/old/
+experiments/vm_scripts/
+experiments/data/
+experiments/figures/
+experiments/results_rerun/

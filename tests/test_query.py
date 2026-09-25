@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
 import zarr
-from helpers import RATES, SHAPE, classify, make_array, smooth_field, true_blocks
 
 from skipzfp import codec, query
+
+from helpers import RATES, SHAPE, classify, make_array, smooth_field, true_blocks
 
 
 @pytest.fixture(params=RATES)

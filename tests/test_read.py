@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
 import zarr
-from helpers import make_array, smooth_field
 
 from skipzfp import SkipZFPCodec
+
+from helpers import make_array, smooth_field
 
 CONFIGS = {
     "plain": dict(rate=8.0),

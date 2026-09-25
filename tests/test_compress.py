@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
 import zfpy
-from helpers import RATES, SHAPE, decode_one_block, smooth_field, split, true_blocks
 
 from skipzfp import codec
+
+from helpers import RATES, SHAPE, decode_one_block, smooth_field, split, true_blocks
 
 
 @pytest.mark.parametrize("rate", RATES)

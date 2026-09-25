@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
 import zarr
-from helpers import LAYERS, ORDERS, make_array, smooth_field
 
 from skipzfp import query
+
+from helpers import LAYERS, ORDERS, make_array, smooth_field
 
 
 @pytest.fixture(scope="module")

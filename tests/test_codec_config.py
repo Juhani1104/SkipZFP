@@ -3,11 +3,12 @@ import json
 import numpy as np
 import pytest
 import zarr
-from helpers import SHAPE, make_array, smooth_field
 from zarr.core.array_spec import ArrayConfig, ArraySpec
 from zarr.core.buffer import default_buffer_prototype
 
 from skipzfp import SkipZFPCodec
+
+from helpers import SHAPE, make_array, smooth_field
 
 CONFIGS = [
     dict(rate=8.0),
