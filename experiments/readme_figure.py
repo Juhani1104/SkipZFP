@@ -109,9 +109,9 @@ def figure(t, ours, best, winner):
     ax.scatter(x, best, s=34, color=[t[w] for w in winner], zorder=3, linewidths=0)
     families = [m for m in BASELINES if m in winner]
     for k, m in enumerate(families):
-        lx = 3.75 + 1.55 * k
-        ax.scatter([lx], [4.3], s=34, color=t[m], linewidths=0)
-        ax.text(lx + 0.14, 4.3, BASELINES[m], color=t["ink"], va="center")
+        lx = 4.3 + 1.55 * k
+        ax.scatter([lx], [4.66], s=34, color=t[m], linewidths=0, clip_on=False)
+        ax.text(lx + 0.14, 4.5, BASELINES[m], color=t["ink"], va="bottom")
     ax.axhline(1, color=t["grid"], lw=1, zorder=0)
     ax.set_xticks(x, LABELS)
     ax.set_xlim(-0.25, len(x) + 0.9)
