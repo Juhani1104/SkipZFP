@@ -26,11 +26,13 @@ skip them without reading them, and decode only the blocks that might.
 
 ## Installation
 
-SkipZFP needs [libzfp](https://github.com/LLNL/zfp) 1.0 and a C compiler.
+SkipZFP needs [libzfp](https://github.com/LLNL/zfp) 1.0 and a C compiler. If libzfp is
+not under `~/.local`, `/usr/local` or `/usr`, set `ZFP_DIR=/path/to/zfp` first.
 
 ```bash
-git clone https://github.com/Juhani1104/SkipZFP.git && cd SkipZFP
-pip install -e .              # set ZFP_DIR=/path/to/zfp if libzfp is not under ~/.local, /usr/local or /usr
+git clone https://github.com/Juhani1104/SkipZFP.git
+cd SkipZFP
+pip install -e .
 ```
 
 ## Quick start
@@ -40,20 +42,27 @@ import numpy as np
 import zarr
 from skipzfp import SkipZFPCodec, query_gt, write_meta
 
-t, y, x = np.meshgrid(np.arange(256), np.arange(128), np.arange(256), indexing="ij")
-data = (280 + 10 * np.sin(x / 20) + 8 * np.cos(y / 15) + 3 * np.sin(t / 30)).astype("float32")
+# a smooth synthetic field: 256 hours on a 128 x 256 grid
+t, y, x = np.meshgrid(
+    np.arange(256), np.arange(128), np.arange(256), indexing="ij"
+)
+data = 280 + 10 * np.sin(x / 20) + 8 * np.cos(y / 15) + 3 * np.sin(t / 30)
+data = data.astype("float32")
 
+codec = SkipZFPCodec(rate=8, sub_chunk=(64, 16, 32), block_order=(1, 2, 0))
 z = zarr.open_group("demo.zarr", mode="w").create_array(
     "t2m", shape=data.shape, chunks=(64, 128, 256), dtype="float32",
-    serializer=SkipZFPCodec(rate=8, sub_chunk=(64, 16, 32), block_order=(1, 2, 0)),
-    compressors=None,
+    serializer=codec, compressors=None,
 )
 z[:] = data
-write_meta(z, data)                 # per-block bounds, stored next to the array
 
-r = query_gt(z, 295.0)              # count(x > 295)
+# per-block bounds, stored next to the array
+write_meta(z, data)
+
+# count(x > 295), reading only the blocks that can match
+r = query_gt(z, 295.0)
 print(r.count, r.bytes_read, r.maybe_blocks, r.total_blocks)
-# 630563 588800 5056 131072  -> read 0.59 MB, decoded 5056 of 131072 blocks
+# 630563 588800 5056 131072
 ```
 
 `query_gt` takes an opened Zarr array on any store (the experiments read from Google
@@ -132,9 +141,9 @@ stopped. The published results used an n2-standard-16 VM in us-central1-b.
 ## Repository layout
 
 ```
-skipzfp/            the codec (codec.py), query planner (query.py) and C core (csrc/)
-tests/              pytest suite, including direct tests of the C API
-experiments/        data download, store preparation, experiments, results, cloud runner
+skipzfp/        codec, query planner, and the C core (csrc/)
+tests/          pytest suite, including direct tests of the C API
+experiments/    data download, experiments, results, cloud runner
 ```
 
 ## Limitations
