@@ -82,19 +82,15 @@ Cloud Storage) or a path, and its result also reports bytes, requests and time p
 
 ## How it works
 
-```mermaid
-flowchart LR
-    A["float32 chunk"] --> B["4x4x4 blocks<br/>ZFP fixed rate"]
-    A --> C["per-block bounds<br/>(uint8, + max error)"]
-    B --> D[("chunk object<br/>payload only")]
-    C --> E[("metadata array")]
-    Q["query: x > T"] --> E
-    E --> F{"each block"}
-    F -- "upper bound ≤ T" --> O["OUT: skip"]
-    F -- "lower bound > T" --> I["IN: count from metadata"]
-    F -- "otherwise" --> M["MAYBE: range-read + decode"]
-    M --> D
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/how-it-works-dark.svg">
+    <img src=".github/how-it-works-light.svg" width="760"
+         alt="Writing splits each chunk into fixed-rate ZFP blocks (payload object) and per-block
+              bounds (metadata array). A query x > T reads only the metadata, classifies each block
+              as MAYBE (range-read and decode), IN (count from metadata) or OUT (skip)">
+  </picture>
+</p>
 
 1. **Fixed-rate blocks.** Every 4 x 4 x 4 block compresses to exactly `rate x 64 / 8`
    bytes, so block *k* starts at a known offset and can be fetched with a range request.
@@ -148,6 +144,7 @@ stopped. The published results used an n2-standard-16 VM in us-central1-b.
 | Metadata overhead | `exp5_overhead.py` | `results/exp5_overhead.json` |
 | Object-size sensitivity | `sensitivity_object_size.py` | `results/sensitivity_object_size.jsonl` |
 | README figure | `readme_figure.py` | `.github/speedup-*.svg` |
+| README diagram | `readme_diagram.py` | `.github/how-it-works-*.svg` |
 
 </details>
 
