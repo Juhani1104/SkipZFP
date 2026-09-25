@@ -108,9 +108,8 @@ def figure(t, ours, best, winner):
     ax.scatter(x, ours, s=22, color=t["ours"], zorder=3, linewidths=0)
     ax.scatter(x, best, s=34, color=[t[w] for w in winner], zorder=3, linewidths=0)
     families = [m for m in BASELINES if m in winner]
-    ax.text(3.55, 4.15, "fastest baseline", color=t["muted"], va="center")
     for k, m in enumerate(families):
-        y = 3.72 - 0.4 * k
+        y = 4.2 - 0.4 * k
         ax.scatter([3.65], [y], s=34, color=t[m], linewidths=0)
         ax.text(3.82, y, BASELINES[m], color=t["ink"], va="center")
     ax.axhline(1, color=t["grid"], lw=1, zorder=0)

@@ -36,13 +36,18 @@ from Google Cloud Storage.</sub>
 
 ## Installation
 
-SkipZFP needs [libzfp](https://github.com/LLNL/zfp) 1.0 and a C compiler. If libzfp is
-not under `~/.local`, `/usr/local` or `/usr`, set `ZFP_DIR=/path/to/zfp` first.
+Requires [libzfp](https://github.com/LLNL/zfp) 1.0 and a C compiler.
 
 ```bash
 git clone https://github.com/Juhani1104/SkipZFP.git
 cd SkipZFP
 pip install -e .
+```
+
+If libzfp is installed elsewhere, point to it:
+
+```bash
+ZFP_DIR=/path/to/zfp pip install -e .
 ```
 
 ## Quick start
