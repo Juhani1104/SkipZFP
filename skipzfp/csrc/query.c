@@ -241,6 +241,186 @@ int szfp_plan_gt(
     return SZFP_OK;
 }
 
+/* classify the blocks of one metadata unit: 0 = OUT, 1 = IN, 2 = MAYBE */
+static void classify_unit(
+    const unsigned char* cm,
+    size_t n_block,
+    double threshold,
+    unsigned char* states
+) {
+    const unsigned char* offs = cm + 3u * sizeof(float);
+    float cmin;
+    float cmax;
+    float eps;
+    double span;
+    double slack;
+
+    memcpy(&cmin, cm, sizeof(float));
+    memcpy(&cmax, cm + sizeof(float), sizeof(float));
+    memcpy(&eps, cm + 2u * sizeof(float), sizeof(float));
+
+    span = (double)cmax - (double)cmin;
+    slack = 8.0 * DBL_EPSILON * (fabs((double)cmin) + fabs((double)cmax));
+
+    for (size_t bid = 0; bid < n_block; bid++) {
+        double bmin;
+        double bmax;
+        unsigned char state = 2;
+
+        if (span == 0.0) {
+            bmin = cmin;
+            bmax = cmax;
+        } else {
+            bmin = (double)cmin + ((double)offs[bid * 2u] / 255.0) * span - slack;
+            bmax = (double)cmin + ((double)offs[bid * 2u + 1u] / 255.0) * span + slack;
+        }
+
+        if (bmin - (double)eps > threshold) {
+            state = 1;
+        } else if (bmax + (double)eps <= threshold) {
+            state = 0;
+        }
+
+        states[bid] = state;
+    }
+}
+
+int szfp_plan_gt_chunks(
+    const unsigned char* meta,
+    size_t meta_size,
+    size_t ux,
+    size_t uy,
+    size_t uz,
+    size_t sx,
+    size_t sy,
+    size_t sz,
+    size_t blocks_per_unit,
+    double threshold,
+    int threads,
+    uint32_t* maybe_chunks,
+    uint32_t* maybe_blocks,
+    size_t maybe_cap,
+    size_t* out_maybe,
+    size_t* out_in,
+    size_t* out_out
+) {
+    size_t gx;
+    size_t gy;
+    size_t gz;
+    size_t n_chunk;
+    size_t n_sub;
+    size_t blocks_per_chunk;
+    size_t total_blocks;
+    unsigned char* states;
+    size_t* n_maybe_chunk;
+    size_t n_in = 0;
+    size_t n_out = 0;
+    int workers;
+
+    if (meta == NULL || maybe_chunks == NULL || maybe_blocks == NULL ||
+        out_maybe == NULL || out_in == NULL || out_out == NULL) {
+        return SZFP_ERR_NULL;
+    }
+
+    *out_maybe = 0;
+    *out_in = 0;
+    *out_out = 0;
+
+    if (sx == 0 || sy == 0 || sz == 0 || ux % sx || uy % sy || uz % sz ||
+        blocks_per_unit == 0 ||
+        meta_size != 3u * sizeof(float) + 2u * blocks_per_unit) {
+        return SZFP_ERR_ARG;
+    }
+
+    gx = ux / sx;
+    gy = uy / sy;
+    gz = uz / sz;
+    n_sub = sx * sy * sz;
+    n_chunk = gx * gy * gz;
+
+    if (n_chunk == 0 || !mul_size(n_sub, blocks_per_unit, &blocks_per_chunk) ||
+        !mul_size(n_chunk, blocks_per_chunk, &total_blocks) ||
+        maybe_cap < total_blocks || blocks_per_chunk > UINT32_MAX ||
+        n_chunk > UINT32_MAX) {
+        return SZFP_ERR_ARG;
+    }
+
+    states = (unsigned char*)malloc(total_blocks);
+    n_maybe_chunk = (size_t*)malloc((n_chunk + 1u) * sizeof(size_t));
+    if (states == NULL || n_maybe_chunk == NULL) {
+        free(states);
+        free(n_maybe_chunk);
+        return SZFP_ERR_MALLOC;
+    }
+
+    workers = threads > 0 ? threads : 1;
+#ifdef _OPENMP
+    if (threads <= 0) {
+        workers = omp_get_max_threads();
+    }
+#endif
+
+    /* pass 1: classify in chunk order and count per chunk */
+#ifdef _OPENMP
+#pragma omp parallel for reduction(+ : n_in, n_out) schedule(static)                   \
+    num_threads(workers)
+#endif
+    for (size_t cid = 0; cid < n_chunk; cid++) {
+        size_t cx = cid / (gy * gz);
+        size_t cy = (cid / gz) % gy;
+        size_t cz = cid % gz;
+        unsigned char* st = states + cid * blocks_per_chunk;
+        size_t m = 0;
+
+        for (size_t sub = 0; sub < n_sub; sub++) {
+            size_t ix = cx * sx + sub / (sy * sz);
+            size_t iy = cy * sy + (sub / sz) % sy;
+            size_t iz = cz * sz + sub % sz;
+            size_t uid = (ix * uy + iy) * uz + iz;
+            unsigned char* su = st + sub * blocks_per_unit;
+
+            classify_unit(meta + uid * meta_size, blocks_per_unit, threshold, su);
+        }
+
+        for (size_t b = 0; b < blocks_per_chunk; b++) {
+            n_in += st[b] == 1;
+            n_out += st[b] == 0;
+            m += st[b] == 2;
+        }
+        n_maybe_chunk[cid + 1u] = m;
+    }
+
+    n_maybe_chunk[0] = 0;
+    for (size_t cid = 0; cid < n_chunk; cid++) {
+        n_maybe_chunk[cid + 1u] += n_maybe_chunk[cid];
+    }
+
+    /* pass 2: write MAYBE blocks, already sorted by (chunk, block) */
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) num_threads(workers)
+#endif
+    for (size_t cid = 0; cid < n_chunk; cid++) {
+        const unsigned char* st = states + cid * blocks_per_chunk;
+        size_t k = n_maybe_chunk[cid];
+
+        for (size_t b = 0; b < blocks_per_chunk; b++) {
+            if (st[b] == 2) {
+                maybe_chunks[k] = (uint32_t)cid;
+                maybe_blocks[k] = (uint32_t)b;
+                k++;
+            }
+        }
+    }
+
+    *out_maybe = n_maybe_chunk[n_chunk];
+    *out_in = n_in;
+    *out_out = n_out;
+
+    free(states);
+    free(n_maybe_chunk);
+    return SZFP_OK;
+}
+
 int szfp_count_gt_blocks(
     const unsigned char* blocks,
     size_t block_count,

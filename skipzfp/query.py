@@ -22,6 +22,9 @@ from zarr.core.sync import sync
 from ._native import load_library
 from .codec import META_ATTR, meta_size
 
+# plan in chunk order in C; False keeps the older unit-order plan + numpy remap
+FUSED_PLAN = True
+
 
 class _Native:
     def __init__(self) -> None:
@@ -53,6 +56,20 @@ class _Native:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         self.lib.szfp_plan_gt.restype = ctypes.c_int
+
+        self.lib.szfp_plan_gt_chunks.argtypes = [
+            ctypes.POINTER(ctypes.c_ubyte),
+            *[ctypes.c_size_t] * 8,
+            ctypes.c_double,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.lib.szfp_plan_gt_chunks.restype = ctypes.c_int
 
         self.lib.szfp_count_gt_blocks.argtypes = [
             ctypes.POINTER(ctypes.c_ubyte),
@@ -160,6 +177,45 @@ class _Native:
             int(n_in.value),
             int(n_out.value),
         )
+
+    def plan_chunks(
+        self,
+        meta: np.ndarray,
+        meta_size: int,
+        unit_grid: tuple[int, int, int],
+        subs: tuple[int, int, int],
+        blocks_per_unit: int,
+        th: float,
+        threads: int,
+    ) -> tuple[np.ndarray, np.ndarray, int, int]:
+        src = np.ascontiguousarray(meta, dtype=np.uint8)
+        cap = int(np.prod(unit_grid)) * blocks_per_unit
+        chunk_ids = np.empty(cap, dtype=np.uint32)
+        block_ids = np.empty(cap, dtype=np.uint32)
+
+        n_maybe = ctypes.c_size_t()
+        n_in = ctypes.c_size_t()
+        n_out = ctypes.c_size_t()
+
+        code = self.lib.szfp_plan_gt_chunks(
+            src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
+            meta_size,
+            *unit_grid,
+            *subs,
+            blocks_per_unit,
+            th,
+            threads,
+            chunk_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
+            block_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
+            cap,
+            ctypes.byref(n_maybe),
+            ctypes.byref(n_in),
+            ctypes.byref(n_out),
+        )
+        self.check(code, "szfp_plan_gt_chunks")
+
+        n = int(n_maybe.value)
+        return chunk_ids[:n], block_ids[:n], int(n_in.value), int(n_out.value)
 
     def count(
         self,
@@ -689,16 +745,28 @@ async def query_gt_async(
     meta_read_sec = time.perf_counter() - t1
 
     t1 = time.perf_counter()
-    unit_ids, ranks, n_in, n_out = await asyncio.to_thread(
-        native().plan,
-        plan_meta(meta, lt, layer),
-        int(np.prod(lt.unit_grid)),
-        lt.meta_size - 4 * (len(lt.layers) - 1),
-        lt.blocks_per_unit,
-        float(threshold),
-        threads,
-    )
-    chunk_ids, block_ids = unit_to_chunk(lt, unit_ids, ranks)
+    if FUSED_PLAN:
+        chunk_ids, block_ids, n_in, n_out = await asyncio.to_thread(
+            native().plan_chunks,
+            plan_meta(meta, lt, layer),
+            lt.meta_size - 4 * (len(lt.layers) - 1),
+            lt.unit_grid,
+            tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape)),
+            lt.blocks_per_unit,
+            float(threshold),
+            threads,
+        )
+    else:
+        unit_ids, ranks, n_in, n_out = await asyncio.to_thread(
+            native().plan,
+            plan_meta(meta, lt, layer),
+            int(np.prod(lt.unit_grid)),
+            lt.meta_size - 4 * (len(lt.layers) - 1),
+            lt.blocks_per_unit,
+            float(threshold),
+            threads,
+        )
+        chunk_ids, block_ids = unit_to_chunk(lt, unit_ids, ranks)
     plan_sec = time.perf_counter() - t1
 
     per_layer = [

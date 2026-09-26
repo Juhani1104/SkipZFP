@@ -4,6 +4,26 @@
 #include <stddef.h>
 #include <stdint.h>
 
+int szfp_plan_gt_chunks(
+    const unsigned char* meta,
+    size_t meta_size,
+    size_t ux,
+    size_t uy,
+    size_t uz,
+    size_t sx,
+    size_t sy,
+    size_t sz,
+    size_t blocks_per_unit,
+    double threshold,
+    int threads,
+    uint32_t* maybe_chunks,
+    uint32_t* maybe_blocks,
+    size_t maybe_cap,
+    size_t* out_maybe,
+    size_t* out_in,
+    size_t* out_out
+);
+
 int szfp_plan_gt(
     const unsigned char* meta,
     size_t n_chunk,
