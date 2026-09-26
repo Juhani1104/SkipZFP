@@ -29,8 +29,9 @@ from Google Cloud Storage.</sub>
 - **Reads only what can match.** Fixed-rate blocks sit at computable offsets, so the
   planner turns the surviving blocks straight into byte-range requests.
 - **Faster than every baseline, up to 50% selectivity.** On ten years of ERA5 2 m
-  temperature in Google Cloud Storage, threshold queries beat the fastest baseline at
-  every selectivity from 0.1% to 50% (1.04–1.82x) and a zstd full scan by 1.3–3.5x.
+  temperature in Google Cloud Storage, threshold queries are 1.2–1.8x faster than the
+  fastest baseline from 1% to 50% selectivity, on par at 0.1%, and 1.3–3.5x faster than
+  a zstd full scan.
 - **Small and standard.** Block bounds add 3.16% to an 8 bpv payload, and the arrays are
   ordinary Zarr v3 arrays with no side index.
 
@@ -119,7 +120,7 @@ overhead are computed offline.
 
 | Experiment | Headline |
 |---|---|
-| Threshold query | 1.04–1.82x faster than the best baseline (t2m, 0.1–50%) |
+| Threshold query | 1.2–1.8x faster than the best baseline (t2m, 1–50%) |
 | Point query | 140 KB per query; chunked and sharded Zarr read 0.8–19 MB |
 | Aggregates | error bounds never violated; sampling CIs miss up to 14% |
 | Filtered aggregates | guaranteed COUNT interval from metadata alone |
