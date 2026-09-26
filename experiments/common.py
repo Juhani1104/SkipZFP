@@ -12,6 +12,9 @@ from skipzfp import codec, query  # noqa: F401
 SHARD = (64, 128, 256)
 SUB_CHUNK = (64, 16, 32)
 GAP_BYTES = 850_000
+# SkipZFP threshold queries: 256 KB to 850 KB run equally fast on GCS, and the
+# smaller gap reads fewer bytes; 128 KB and below get slower (more requests)
+SKIPZFP_GAP_BYTES = 256_000
 CONCURRENCY = 128
 EMPTY = np.iinfo(np.uint64).max
 VARS = ("t2m", "ws")

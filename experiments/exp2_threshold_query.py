@@ -23,7 +23,7 @@ import zarr
 import baselines
 from common import (
     CONCURRENCY,
-    GAP_BYTES,
+    SKIPZFP_GAP_BYTES,
     VARS,
     load_era5,
     open_counted,
@@ -56,7 +56,10 @@ def one(url, method, th):
     sync = zarr.core.sync.sync
     if method == "skipzfp":
         r = query.query_gt(
-            arr, th, request_concurrency=CONCURRENCY, merge_gap_blocks=GAP_BYTES // 64
+            arr,
+            th,
+            request_concurrency=CONCURRENCY,
+            merge_gap_blocks=SKIPZFP_GAP_BYTES // 64,
         )
         out = dict(
             seconds=r.total_seconds,
