@@ -1,5 +1,7 @@
 #include <zfp.h>
 
+#include "fastdec.h"
+
 #include <float.h>
 #include <limits.h>
 #include <math.h>
@@ -81,6 +83,11 @@ static int decode_block(
 
     if (src_size == 0 || block_dim <= 0 || rate <= 0.0 || !isfinite(rate)) {
         return SZFP_ERR_ARG;
+    }
+
+    if (szfp_fast_ok(block_dim, rate, src_size)) {
+        szfp_fast_decode(src, src_size, out);
+        return SZFP_OK;
     }
 
     stream = stream_open((void*)src, src_size);
@@ -509,7 +516,15 @@ int szfp_count_offsets(
         }
     }
 
-    {
+    if (szfp_fast_ok(block_dim, rate, block_nbytes)) {
+        for (size_t i = 0; i < n; i++) {
+            szfp_fast_decode(buf + offsets[i], block_nbytes, vals);
+
+            for (size_t k = 0; k < nval; k++) {
+                count += (double)vals[k] > threshold;
+            }
+        }
+    } else {
         bitstream* stream = stream_open((void*)buf, buf_size);
         zfp_stream* zfp;
 
