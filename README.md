@@ -30,8 +30,8 @@ from Google Cloud Storage.</sub>
   planner turns the surviving blocks straight into byte-range requests.
 - **Faster than every baseline, up to 50% selectivity.** On ten years of ERA5 2 m
   temperature in Google Cloud Storage, threshold queries are 1.2–1.8x faster than the
-  fastest baseline from 1% to 50% selectivity, on par at 0.1%, and 1.3–3.5x faster than
-  a zstd full scan.
+  fastest baseline from 1% to 50% selectivity, and 1.3–3.5x faster than a zstd full
+  scan.
 - **Small and standard.** Block bounds add 3.16% to an 8 bpv payload, and the arrays are
   ordinary Zarr v3 arrays with no side index.
 
