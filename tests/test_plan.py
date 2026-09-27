@@ -99,3 +99,26 @@ def test_plan_chunks_rejects_bad_geometry():
         query.native().plan_chunks(meta, 12 + 2 * 8, (2, 1, 1), (3, 1, 1), 8, 0.0, 1)
     with pytest.raises(RuntimeError):
         query.native().plan_chunks(meta, 12 + 2 * 7, (1, 1, 1), (1, 1, 1), 8, 0.0, 1)
+
+
+@pytest.mark.parametrize("gap", (0, 3, 1000))
+def test_merge_ranges_sorts_unsorted_input(gap):
+    rng = np.random.default_rng(1)
+    chunks = np.repeat(np.arange(5, dtype=np.uint32), 40)
+    blocks = np.tile(np.arange(0, 400, 10, dtype=np.uint32), 5)
+    keys = [f"k{i}" for i in range(5)]
+    ref, ref_blocks = query.merge_ranges(keys, chunks, blocks, 64, gap)
+    perm = rng.permutation(len(blocks))
+    got, got_blocks = query.merge_ranges(keys, chunks[perm], blocks[perm], 64, gap)
+    assert got == ref
+    assert np.array_equal(got_blocks, ref_blocks)
+
+
+def test_plan_meta_single_layer_keeps_the_bytes(arrays):
+    _, arrs = arrays
+    z = arrs[0]
+    lt = query.get_layout(z)
+    meta, _, _ = asyncio.run(query.read_meta(z, lt))
+    out = query.plan_meta(meta, lt, 0)
+    assert out.shape == (meta.size // lt.meta_size, lt.meta_size)
+    assert np.array_equal(out.reshape(-1), meta)

@@ -26,6 +26,10 @@ from .codec import META_ATTR, meta_size
 FUSED_PLAN = True
 
 
+# szfp_merge_ranges returns this (SZFP_ERR_ARG) when its input is not sorted
+_MERGE_UNSORTED = 2
+
+
 class _Native:
     def __init__(self) -> None:
         self.lib = load_library()
@@ -251,7 +255,12 @@ class _Native:
         chunk_ids: np.ndarray,
         block_ids: np.ndarray,
         gap: int,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        unsorted_ok: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+        """Merge sorted (chunk, block) pairs into ranges.
+
+        With unsorted_ok, input that is not sorted returns None instead of raising.
+        """
         n = len(block_ids)
         ch = np.ascontiguousarray(chunk_ids, dtype=np.uint32)
         bl = np.ascontiguousarray(block_ids, dtype=np.uint32)
@@ -272,6 +281,8 @@ class _Native:
             out_item.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
             ctypes.byref(m),
         )
+        if unsorted_ok and code == _MERGE_UNSORTED:
+            return None
         self.check(code, "szfp_merge_ranges")
         k = int(m.value)
         return out_chunk[:k], out_first[:k], out_last[:k], out_item[:k]
@@ -627,6 +638,9 @@ def unit_to_chunk(
 def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
     m = meta.reshape(-1, lt.meta_size)
     n_layer = len(lt.layers)
+    if n_layer == 1:
+        # already in the single-layer format the planner reads; skip the copy
+        return np.ascontiguousarray(m)
     eps = m[:, 8 + 4 * layer : 12 + 4 * layer]
     return np.ascontiguousarray(
         np.concatenate([m[:, :8], eps, m[:, 8 + 4 * n_layer :]], axis=1)
@@ -680,17 +694,15 @@ def merge_ranges(
     if n == 0:
         return [], np.empty(0, dtype=np.uint32)
 
-    key = (chunk_ids.astype(np.uint64) << np.uint64(32)) | block_ids.astype(np.uint64)
-    if np.all(key[1:] > key[:-1]):
-        chunks, blocks = chunk_ids, block_ids
-    else:
+    # the C merge checks the order itself, so sort only when it says to
+    chunks, blocks = chunk_ids, block_ids
+    merged = native().merge(chunks, blocks, merge_gap_blocks, unsorted_ok=True)
+    if merged is None:
         order = np.lexsort((block_ids, chunk_ids))
         chunks = chunk_ids[order]
         blocks = block_ids[order]
-
-    out_chunk, out_first, out_last, out_item = native().merge(
-        chunks, blocks, merge_gap_blocks
-    )
+        merged = native().merge(chunks, blocks, merge_gap_blocks)
+    out_chunk, out_first, out_last, out_item = merged
     item_end = np.r_[out_item[1:], n]
     out = [
         _MergedRange(
