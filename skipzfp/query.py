@@ -4,6 +4,7 @@ import asyncio
 import collections
 import ctypes
 import itertools
+import math
 import os
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -71,6 +72,21 @@ class _Native:
         ]
         self.lib.szfp_plan_gt_chunks.restype = ctypes.c_int
 
+        self.lib.szfp_plan_range_chunks.argtypes = [
+            ctypes.POINTER(ctypes.c_ubyte),
+            *[ctypes.c_size_t] * 8,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.lib.szfp_plan_range_chunks.restype = ctypes.c_int
+
         self.lib.szfp_count_gt_blocks.argtypes = [
             ctypes.POINTER(ctypes.c_ubyte),
             ctypes.c_size_t,
@@ -82,6 +98,19 @@ class _Native:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         self.lib.szfp_count_gt_blocks.restype = ctypes.c_int
+
+        self.lib.szfp_count_range_blocks.argtypes = [
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_double,
+            ctypes.c_int,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.lib.szfp_count_range_blocks.restype = ctypes.c_int
 
         self.lib.szfp_merge_ranges.argtypes = [
             ctypes.POINTER(ctypes.c_uint32),
@@ -108,6 +137,20 @@ class _Native:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         self.lib.szfp_count_offsets.restype = ctypes.c_int
+
+        self.lib.szfp_count_offsets_range.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_double,
+            ctypes.c_int,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.lib.szfp_count_offsets_range.restype = ctypes.c_int
 
     @staticmethod
     def check(code: int, name: str) -> None:
@@ -187,7 +230,9 @@ class _Native:
         blocks_per_unit: int,
         th: float,
         threads: int,
+        hi: float = math.inf,
     ) -> tuple[np.ndarray, np.ndarray, int, int]:
+        """Blocks for th < x <= hi, in chunk order: MAYBE ids plus IN/OUT counts."""
         src = np.ascontiguousarray(meta, dtype=np.uint8)
         cap = int(np.prod(unit_grid)) * blocks_per_unit
         chunk_ids = np.empty(cap, dtype=np.uint32)
@@ -197,13 +242,14 @@ class _Native:
         n_in = ctypes.c_size_t()
         n_out = ctypes.c_size_t()
 
-        code = self.lib.szfp_plan_gt_chunks(
+        code = self.lib.szfp_plan_range_chunks(
             src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             meta_size,
             *unit_grid,
             *subs,
             blocks_per_unit,
             th,
+            hi,
             threads,
             chunk_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
             block_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
@@ -212,7 +258,7 @@ class _Native:
             ctypes.byref(n_in),
             ctypes.byref(n_out),
         )
-        self.check(code, "szfp_plan_gt_chunks")
+        self.check(code, "szfp_plan_range_chunks")
 
         n = int(n_maybe.value)
         return chunk_ids[:n], block_ids[:n], int(n_in.value), int(n_out.value)
@@ -226,6 +272,7 @@ class _Native:
         block_dim: int,
         th: float,
         threads: int,
+        hi: float = math.inf,
     ) -> int:
         if n_block == 0:
             return 0
@@ -233,17 +280,18 @@ class _Native:
         src = np.ascontiguousarray(blocks, dtype=np.uint8)
         out = ctypes.c_size_t()
 
-        code = self.lib.szfp_count_gt_blocks(
+        code = self.lib.szfp_count_range_blocks(
             src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             n_block,
             block_size,
             rate,
             block_dim,
             th,
+            hi,
             threads,
             ctypes.byref(out),
         )
-        self.check(code, "szfp_count_gt_blocks")
+        self.check(code, "szfp_count_range_blocks")
         return int(out.value)
 
     def merge(
@@ -284,11 +332,12 @@ class _Native:
         rate: float,
         block_dim: int,
         th: float,
+        hi: float = math.inf,
     ) -> int:
         offs = np.ascontiguousarray(offsets, dtype=np.uint64)
         out = ctypes.c_size_t()
 
-        code = self.lib.szfp_count_offsets(
+        code = self.lib.szfp_count_offsets_range(
             data,
             len(data),
             offs.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
@@ -297,9 +346,10 @@ class _Native:
             rate,
             block_dim,
             th,
+            hi,
             ctypes.byref(out),
         )
-        self.check(code, "szfp_count_offsets")
+        self.check(code, "szfp_count_offsets_range")
         return int(out.value)
 
 
@@ -640,15 +690,16 @@ async def stream_count(
     block_size: int,
     rate: float,
     block_dim: int,
-    threshold: float,
+    lo: float,
     concurrency: int,
+    hi: float = math.inf,
 ) -> tuple[int, int, float]:
     loop = asyncio.get_running_loop()
     sem = asyncio.Semaphore(concurrency)
 
     def count(data: bytes, offs: np.ndarray) -> tuple[int, float]:
         t0 = time.perf_counter()
-        n = native().count_offsets(data, offs, block_size, rate, block_dim, threshold)
+        n = native().count_offsets(data, offs, block_size, rate, block_dim, lo, hi)
         return n, time.perf_counter() - t0
 
     async def one(req: _MergedRange) -> tuple[int, int, float]:
@@ -707,9 +758,10 @@ def merge_ranges(
     return out, blocks
 
 
-async def query_gt_async(
+async def _query_async(
     arr: zarr.Array,
-    threshold: float,
+    lo: float,
+    hi: float,
     *,
     threads: int = 0,
     request_concurrency: int = 32,
@@ -718,8 +770,9 @@ async def query_gt_async(
     layer: int | None = None,
     max_chunk_requests: int = 1,
 ) -> QueryResult:
+    """Count values with lo < x <= hi (either bound may be infinite)."""
     if not isinstance(arr, zarr.Array):
-        raise TypeError("query_gt_async expects an opened zarr.Array")
+        raise TypeError("the query expects an opened zarr.Array")
 
     if request_concurrency <= 0:
         raise ValueError("request_concurrency must be greater than 0")
@@ -745,7 +798,8 @@ async def query_gt_async(
     meta_read_sec = time.perf_counter() - t1
 
     t1 = time.perf_counter()
-    if FUSED_PLAN:
+    # the older unit-order planner only handles x > lo
+    if FUSED_PLAN or hi != math.inf:
         chunk_ids, block_ids, n_in, n_out = await asyncio.to_thread(
             native().plan_chunks,
             plan_meta(meta, lt, layer),
@@ -753,8 +807,9 @@ async def query_gt_async(
             lt.unit_grid,
             tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape)),
             lt.blocks_per_unit,
-            float(threshold),
+            lo,
             threads,
+            hi,
         )
     else:
         unit_ids, ranks, n_in, n_out = await asyncio.to_thread(
@@ -763,7 +818,7 @@ async def query_gt_async(
             int(np.prod(lt.unit_grid)),
             lt.meta_size - 4 * (len(lt.layers) - 1),
             lt.blocks_per_unit,
-            float(threshold),
+            lo,
             threads,
         )
         chunk_ids, block_ids = unit_to_chunk(lt, unit_ids, ranks)
@@ -802,8 +857,9 @@ async def query_gt_async(
             lt.layer_bytes[0],
             rate,
             lt.block_dim,
-            float(threshold),
+            lo,
             request_concurrency,
+            hi,
         )
         payload_read_sec = time.perf_counter() - t1
         n_payload_reqs = len(merged0)
@@ -844,14 +900,14 @@ async def query_gt_async(
                 )
             else:
                 c = chunk_of[item]
-                lo, hi = np.searchsorted(sorted_chunks, [c, c + 1])
-                ids = sorted_blocks[lo:hi].astype(np.int64)
+                b_lo, b_hi = np.searchsorted(sorted_chunks, [c, c + 1])
+                ids = sorted_blocks[b_lo:b_hi].astype(np.int64)
                 for jj in range(layer + 1):
                     seg = buf[
                         lt.layer_starts[jj] : lt.layer_starts[jj]
                         + lt.blocks_per_chunk * lt.layer_bytes[jj]
                     ]
-                    out[lo:hi, cols[jj] : cols[jj + 1]] = seg.reshape(
+                    out[b_lo:b_hi, cols[jj] : cols[jj + 1]] = seg.reshape(
                         -1, lt.layer_bytes[jj]
                     )[ids]
         blocks = out.reshape(-1)
@@ -864,8 +920,9 @@ async def query_gt_async(
             block_size,
             rate,
             lt.block_dim,
-            float(threshold),
+            lo,
             threads,
+            hi,
         )
         decode_sec = time.perf_counter() - t1
         payload_bytes = sum(len(x) for x in payload_parts)
@@ -895,6 +952,66 @@ async def query_gt_async(
     )
 
 
+def _below_f32(x: float) -> float:
+    """Largest float32 strictly below x (-inf if there is none)."""
+    f = np.float32(x)
+    if float(f) >= x:
+        f = np.nextafter(f, np.float32(-np.inf))
+    return float(f)
+
+
+def range_bounds(
+    lo: float | None,
+    hi: float | None,
+    lo_inclusive: bool = False,
+    hi_inclusive: bool = True,
+) -> tuple[float, float]:
+    """Map a range on float32 values to the half-open (lo, hi] the planner uses.
+
+    Decoded values are float32, so x >= a is exactly x > (largest float32 < a),
+    and x < b is exactly x <= (largest float32 < b).
+    """
+    for name, v in (("lo", lo), ("hi", hi)):
+        if v is not None and math.isnan(v):
+            raise ValueError(f"{name} must not be NaN")
+    if lo is not None and hi is not None and lo > hi:
+        raise ValueError("lo must not exceed hi")
+    if lo is None:
+        a = -math.inf
+    else:
+        a = _below_f32(float(lo)) if lo_inclusive else float(lo)
+    if hi is None:
+        b = math.inf
+    else:
+        b = float(hi) if hi_inclusive else _below_f32(float(hi))
+    return a, b
+
+
+async def query_gt_async(
+    arr: zarr.Array, threshold: float, **kwargs: Any
+) -> QueryResult:
+    """Count values x > threshold."""
+    return await _query_async(arr, float(threshold), math.inf, **kwargs)
+
+
+async def query_range_async(
+    arr: zarr.Array,
+    lo: float | None = None,
+    hi: float | None = None,
+    *,
+    lo_inclusive: bool = False,
+    hi_inclusive: bool = True,
+    **kwargs: Any,
+) -> QueryResult:
+    """Count values between lo and hi; None leaves that side open.
+
+    By default the range is lo < x <= hi; lo_inclusive / hi_inclusive switch
+    each end between < and <=. query_range_async(arr, hi=T) counts x <= T.
+    """
+    a, b = range_bounds(lo, hi, lo_inclusive, hi_inclusive)
+    return await _query_async(arr, a, b, **kwargs)
+
+
 def query_gt(
     source: Any,
     threshold: float,
@@ -915,9 +1032,44 @@ def query_gt(
     )
 
     return sync(
-        query_gt_async(
+        _query_async(
             arr,
-            threshold,
+            float(threshold),
+            math.inf,
+            threads=threads,
+            request_concurrency=request_concurrency,
+            request_batch_size=request_batch_size,
+            merge_gap_blocks=merge_gap_blocks,
+            layer=layer,
+            max_chunk_requests=max_chunk_requests,
+        )
+    )
+
+
+def query_range(
+    source: Any,
+    lo: float | None = None,
+    hi: float | None = None,
+    *,
+    lo_inclusive: bool = False,
+    hi_inclusive: bool = True,
+    array_path: str = "",
+    storage_options: Mapping[str, Any] | None = None,
+    threads: int = 0,
+    request_concurrency: int = 32,
+    request_batch_size: int | None = None,
+    merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
+) -> QueryResult:
+    """Count values between lo and hi; see query_range_async for the bounds."""
+    arr = open_skipzfp(source, array_path=array_path, storage_options=storage_options)
+    a, b = range_bounds(lo, hi, lo_inclusive, hi_inclusive)
+    return sync(
+        _query_async(
+            arr,
+            a,
+            b,
             threads=threads,
             request_concurrency=request_concurrency,
             request_batch_size=request_batch_size,
