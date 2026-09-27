@@ -49,6 +49,7 @@ THEMES = {
     ),
 }
 SELECTIVITIES = [0.001, 0.01, 0.05, 0.1, 0.2, 0.5]
+TOP = 6.0  # y-axis limit; the title and legend sit on this line
 LABELS = ["0.1%", "1%", "5%", "10%", "20%", "50%"]
 BASELINES = {
     "zstd_zm": "zstd + zone map",
@@ -110,13 +111,14 @@ def figure(t, ours, best, winner):
     families = [m for m in BASELINES if m in winner]
     for k, m in enumerate(families):
         lx = 4.3 + 1.55 * k
-        ax.scatter([lx], [4.66], s=34, color=t[m], linewidths=0, clip_on=False)
-        ax.text(lx + 0.14, 4.5, BASELINES[m], color=t["ink"], va="bottom")
+        ax.scatter([lx], [TOP + 0.16], s=34, color=t[m], linewidths=0, clip_on=False)
+        ax.text(lx + 0.14, TOP, BASELINES[m], color=t["ink"], va="bottom")
     ax.axhline(1, color=t["grid"], lw=1, zorder=0)
     ax.set_xticks(x, LABELS)
     ax.set_xlim(-0.25, len(x) + 0.9)
-    ax.set_ylim(0.5, 4.5)
-    ax.set_yticks([1, 2, 3, 4], ["1×", "2×", "3×", "4×"])
+    ax.set_ylim(0.5, TOP)
+    ticks = list(range(1, int(TOP)))
+    ax.set_yticks(ticks, [f"{k}×" for k in ticks])
     ax.yaxis.grid(True, color=t["grid"], lw=0.7)
     ax.set_axisbelow(True)
     ax.text(
@@ -132,7 +134,7 @@ def figure(t, ours, best, winner):
     )
     ax.text(
         -0.25,
-        4.5,
+        TOP,
         "How many times faster than reading the whole array",
         color=t["muted"],
         va="bottom",
