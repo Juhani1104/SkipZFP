@@ -647,6 +647,80 @@ def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
     )
 
 
+@dataclass(frozen=True)
+class _HedgeParams:
+    factor: float
+    min_samples: int
+    min_delay: float
+
+
+class _Hedger:
+    """Re-issues a slow range read and keeps whichever copy arrives first.
+
+    Once every read of the query has started, a read still running after
+    `factor` times the median duration so far (at least `min_delay` seconds,
+    after `min_samples` reads have finished) gets a duplicate request. Reads that
+    stall while holding every concurrency slot are only hedged once they end.
+    """
+
+    def __init__(self, total: int, params: _HedgeParams | None) -> None:
+        self.params = params
+        self.durations: list[float] = []
+        self.hedged = 0
+        self.total = total
+        self.started = 0
+
+    def delay(self) -> float | None:
+        p = self.params
+        if p is None or len(self.durations) < p.min_samples:
+            return None
+        # only once every read has started, so duplicates never delay first reads
+        if self.started < self.total:
+            return None
+        return max(p.min_delay, p.factor * float(np.median(self.durations)))
+
+    async def read(self, store: Any, req: _Range, sem: asyncio.Semaphore) -> bytes:
+        if self.params is None:
+            return await read_one(store, req, sem)
+        async with sem:
+            self.started += 1
+            t0 = time.perf_counter()
+            first = asyncio.ensure_future(read_one(store, req, _NO_LIMIT))
+            # re-evaluate while waiting: the threshold only exists once enough
+            # reads have finished and every read has started
+            while True:
+                delay = self.delay()
+                if delay is None:
+                    timeout = self.params.min_delay
+                else:
+                    timeout = max(0.0, delay - (time.perf_counter() - t0))
+                done, _ = await asyncio.wait({first}, timeout=timeout)
+                if done or delay is not None:
+                    break
+            if not done:
+                self.hedged += 1
+                second = asyncio.ensure_future(read_one(store, req, _NO_LIMIT))
+                done, pending = await asyncio.wait(
+                    {first, second}, return_when=asyncio.FIRST_COMPLETED
+                )
+                for p in pending:
+                    p.cancel()
+            data = done.pop().result()
+            self.durations.append(time.perf_counter() - t0)
+            return data
+
+
+class _NoLimit:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *exc: Any) -> None:
+        return None
+
+
+_NO_LIMIT: Any = _NoLimit()
+
+
 async def stream_count(
     store: Any,
     merged: Sequence[_MergedRange],
@@ -656,6 +730,7 @@ async def stream_count(
     block_dim: int,
     threshold: float,
     concurrency: int,
+    hedge: _HedgeParams | None = None,
 ) -> tuple[int, int, float]:
     loop = asyncio.get_running_loop()
     sem = asyncio.Semaphore(concurrency)
@@ -665,8 +740,10 @@ async def stream_count(
         n = native().count_offsets(data, offs, block_size, rate, block_dim, threshold)
         return n, time.perf_counter() - t0
 
+    hedger = _Hedger(len(merged), hedge)
+
     async def one(req: _MergedRange) -> tuple[int, int, float]:
-        data = await read_one(
+        data = await hedger.read(
             store, _Range(key=req.key, start=req.start, end=req.end), sem
         )
         rows = blocks[req.item_start : req.item_end].astype(np.int64) - req.first_block
@@ -729,9 +806,32 @@ async def query_gt_async(
     merge_gap_blocks: int = 0,
     layer: int | None = None,
     max_chunk_requests: int = 1,
+    hedge: bool = False,
+    hedge_factor: float = 3.0,
+    hedge_min_samples: int = 20,
+    hedge_min_delay: float = 0.05,
 ) -> QueryResult:
+    """Count values > threshold, reading and decoding only blocks that may match.
+
+    With hedge=True, a payload read still running after hedge_factor times the
+    median read time (once every read has started) is issued a second time and
+    the first copy to arrive is used. Off by default: it trims the slowest
+    queries on object stores with a long latency tail, at the cost of a few
+    duplicate requests.
+    """
     if not isinstance(arr, zarr.Array):
         raise TypeError("query_gt_async expects an opened zarr.Array")
+    if hedge and (hedge_factor <= 0 or hedge_min_samples < 1 or hedge_min_delay < 0):
+        raise ValueError(
+            "hedge_factor must be > 0, hedge_min_samples >= 1, hedge_min_delay >= 0"
+        )
+    hedge_params = (
+        _HedgeParams(
+            float(hedge_factor), int(hedge_min_samples), float(hedge_min_delay)
+        )
+        if hedge
+        else None
+    )
 
     if request_concurrency <= 0:
         raise ValueError("request_concurrency must be greater than 0")
@@ -816,6 +916,7 @@ async def query_gt_async(
             lt.block_dim,
             float(threshold),
             request_concurrency,
+            hedge_params,
         )
         payload_read_sec = time.perf_counter() - t1
         n_payload_reqs = len(merged0)
@@ -919,7 +1020,12 @@ def query_gt(
     merge_gap_blocks: int = 0,
     layer: int | None = None,
     max_chunk_requests: int = 1,
+    hedge: bool = False,
+    hedge_factor: float = 3.0,
+    hedge_min_samples: int = 20,
+    hedge_min_delay: float = 0.05,
 ) -> QueryResult:
+    """Synchronous query_gt_async on an opened array or a path; see its docstring."""
     arr = open_skipzfp(
         source,
         array_path=array_path,
@@ -936,5 +1042,9 @@ def query_gt(
             merge_gap_blocks=merge_gap_blocks,
             layer=layer,
             max_chunk_requests=max_chunk_requests,
+            hedge=hedge,
+            hedge_factor=hedge_factor,
+            hedge_min_samples=hedge_min_samples,
+            hedge_min_delay=hedge_min_delay,
         )
     )
