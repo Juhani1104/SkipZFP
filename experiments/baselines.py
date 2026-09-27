@@ -134,7 +134,7 @@ async def read_full(store, keys, conc):
     return await asyncio.gather(*(one(k) for k in keys))
 
 
-async def stream(store, reqs, conc, work):
+async def stream(store, reqs, conc, work, missing_ok=False):
     loop = asyncio.get_running_loop()
     sem = asyncio.Semaphore(conc)
 
@@ -151,6 +151,9 @@ async def stream(store, reqs, conc, work):
                 byte_range=RangeByteRequest(*rng) if rng else None,
             )
         if buf is None:
+            # zarr skips chunks that are entirely fill value; none of them count
+            if missing_ok and rng is None:
+                return 0, 0.0
             raise FileNotFoundError(key)
         return await loop.run_in_executor(POOL, timed, buf.to_bytes(), item)
 
@@ -225,7 +228,11 @@ async def full_scan(arr, th, conc, kind):
     else:
         work = chunk_counter(kind, 4 * int(np.prod(shape)), th)
     n, t_dec = await stream(
-        arr.store_path.store, [(k, None, None) for k in keys], conc, work
+        arr.store_path.store,
+        [(k, None, None) for k in keys],
+        conc,
+        work,
+        missing_ok=float(arr.metadata.fill_value) <= th,
     )
     sec = time.perf_counter() - t0
     return dict(
