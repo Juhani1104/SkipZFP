@@ -1,5 +1,6 @@
 from .codec import SkipZFPCodec, write_meta
-from .query import QueryResult, open_skipzfp, query_gt, query_range
+from .query import QueryResult, open_skipzfp, query_gt
+from .range_query import query_range
 
 __all__ = [
     "SkipZFPCodec",

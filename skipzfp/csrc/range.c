@@ -1,6 +1,7 @@
 #include <zfp.h>
 
 #include "fastdec.h"
+#include "range.h"
 
 #include <float.h>
 #include <limits.h>
@@ -34,6 +35,12 @@ static int mul_size(size_t a, size_t b, size_t* out) {
 
     *out = a * b;
     return 1;
+}
+
+/* the value predicate of a range query: lo < v <= hi */
+static inline int in_range(float v, double lo, double hi) {
+    double d = (double)v;
+    return d > lo && d <= hi;
 }
 
 static int block_layout(int block_dim, double rate, size_t* nval, size_t* nbytes) {
@@ -123,136 +130,14 @@ static int decode_block(
     return ret == 0 ? SZFP_ERR_ZFP : SZFP_OK;
 }
 
-int szfp_plan_gt(
-    const unsigned char* meta,
-    size_t n_chunk,
-    size_t meta_size,
-    size_t blocks_per_chunk,
-    double threshold,
-    int threads,
-    uint32_t* maybe_chunks,
-    uint32_t* maybe_blocks,
-    size_t maybe_cap,
-    size_t* out_maybe,
-    size_t* out_in,
-    size_t* out_out
-) {
-    size_t total_blocks;
-    size_t off_size;
-    size_t need_size;
-    unsigned char* states;
-    int workers;
 
-    if (meta == NULL || maybe_chunks == NULL || maybe_blocks == NULL ||
-        out_maybe == NULL || out_in == NULL || out_out == NULL) {
-        return SZFP_ERR_NULL;
-    }
-
-    *out_maybe = 0;
-    *out_in = 0;
-    *out_out = 0;
-
-    if (n_chunk == 0 || blocks_per_chunk == 0 ||
-        !mul_size(n_chunk, blocks_per_chunk, &total_blocks) ||
-        maybe_cap < total_blocks || !mul_size(blocks_per_chunk, 2u, &off_size)) {
-        return SZFP_ERR_ARG;
-    }
-
-    if (3u * sizeof(float) > SIZE_MAX - off_size) {
-        return SZFP_ERR_SIZE;
-    }
-
-    need_size = 3u * sizeof(float) + off_size;
-
-    if (meta_size != need_size) {
-        return SZFP_ERR_ARG;
-    }
-
-    states = (unsigned char*)malloc(total_blocks);
-    if (states == NULL) {
-        return SZFP_ERR_MALLOC;
-    }
-
-    workers = threads > 0 ? threads : 1;
-
-#ifdef _OPENMP
-    if (threads <= 0) {
-        workers = omp_get_max_threads();
-    }
-#pragma omp parallel for schedule(static) num_threads(workers)
-#endif
-    for (size_t cid = 0; cid < n_chunk; cid++) {
-        const unsigned char* cm = meta + cid * meta_size;
-        const unsigned char* offs = cm + 3u * sizeof(float);
-        float cmin;
-        float cmax;
-        float eps;
-        double span;
-        double slack;
-
-        memcpy(&cmin, cm, sizeof(float));
-        memcpy(&cmax, cm + sizeof(float), sizeof(float));
-        memcpy(&eps, cm + 2u * sizeof(float), sizeof(float));
-
-        span = (double)cmax - (double)cmin;
-        slack = 8.0 * DBL_EPSILON * (fabs((double)cmin) + fabs((double)cmax));
-
-        for (size_t bid = 0; bid < blocks_per_chunk; bid++) {
-            double bmin;
-            double bmax;
-            unsigned char state = 2;
-
-            if (span == 0.0) {
-                bmin = cmin;
-                bmax = cmax;
-            } else {
-                bmin = (double)cmin + ((double)offs[bid * 2u] / 255.0) * span - slack;
-
-                bmax =
-                    (double)cmin + ((double)offs[bid * 2u + 1u] / 255.0) * span + slack;
-            }
-
-            if (bmin - (double)eps > threshold) {
-                state = 1;
-            } else if (bmax + (double)eps <= threshold) {
-                state = 0;
-            }
-
-            states[cid * blocks_per_chunk + bid] = state;
-        }
-    }
-
-    {
-        size_t n_in = 0;
-        size_t n_out = 0;
-        size_t n_maybe = 0;
-
-        for (size_t i = 0; i < total_blocks; i++) {
-            if (states[i] == 1) {
-                n_in++;
-            } else if (states[i] == 0) {
-                n_out++;
-            } else {
-                maybe_chunks[n_maybe] = (uint32_t)(i / blocks_per_chunk);
-                maybe_blocks[n_maybe] = (uint32_t)(i % blocks_per_chunk);
-                n_maybe++;
-            }
-        }
-
-        *out_maybe = n_maybe;
-        *out_in = n_in;
-        *out_out = n_out;
-    }
-
-    free(states);
-    return SZFP_OK;
-}
-
-/* classify the blocks of one metadata unit: 0 = OUT, 1 = IN, 2 = MAYBE */
+/* classify the blocks of one metadata unit for lo < x <= hi:
+ * 0 = OUT, 1 = IN, 2 = MAYBE */
 static void classify_unit(
     const unsigned char* cm,
     size_t n_block,
-    double threshold,
+    double lo,
+    double hi,
     unsigned char* states
 ) {
     const unsigned char* offs = cm + 3u * sizeof(float);
@@ -282,9 +167,10 @@ static void classify_unit(
             bmax = (double)cmin + ((double)offs[bid * 2u + 1u] / 255.0) * span + slack;
         }
 
-        if (bmin - (double)eps > threshold) {
+        /* predicate lo < x <= hi; either bound may be infinite */
+        if (bmin - (double)eps > lo && bmax + (double)eps <= hi) {
             state = 1;
-        } else if (bmax + (double)eps <= threshold) {
+        } else if (bmax + (double)eps <= lo || bmin - (double)eps > hi) {
             state = 0;
         }
 
@@ -292,7 +178,7 @@ static void classify_unit(
     }
 }
 
-int szfp_plan_gt_chunks(
+int szfp_plan_range_chunks(
     const unsigned char* meta,
     size_t meta_size,
     size_t ux,
@@ -302,7 +188,8 @@ int szfp_plan_gt_chunks(
     size_t sy,
     size_t sz,
     size_t blocks_per_unit,
-    double threshold,
+    double lo,
+    double hi,
     int threads,
     uint32_t* maybe_chunks,
     uint32_t* maybe_blocks,
@@ -386,7 +273,7 @@ int szfp_plan_gt_chunks(
             size_t uid = (ix * uy + iy) * uz + iz;
             unsigned char* su = st + sub * blocks_per_unit;
 
-            classify_unit(meta + uid * meta_size, blocks_per_unit, threshold, su);
+            classify_unit(meta + uid * meta_size, blocks_per_unit, lo, hi, su);
         }
 
         for (size_t b = 0; b < blocks_per_chunk; b++) {
@@ -428,13 +315,14 @@ int szfp_plan_gt_chunks(
     return SZFP_OK;
 }
 
-int szfp_count_gt_blocks(
+int szfp_count_range_blocks(
     const unsigned char* blocks,
     size_t block_count,
     size_t block_nbytes,
     double rate,
     int block_dim,
-    double threshold,
+    double lo,
+    double hi,
     int threads,
     size_t* out_count
 ) {
@@ -523,7 +411,7 @@ int szfp_count_gt_blocks(
         local_count = 0;
 
         for (size_t i = 0; i < nval; i++) {
-            local_count += (double)vals[i] > threshold;
+            local_count += in_range(vals[i], lo, hi);
         }
 
         count += local_count;
@@ -538,117 +426,9 @@ int szfp_count_gt_blocks(
     *out_count = count;
     return SZFP_OK;
 }
-int szfp_decode_blocks(
-    const unsigned char* blocks,
-    size_t block_count,
-    size_t block_nbytes,
-    double rate,
-    int block_dim,
-    int threads,
-    float* out
-) {
-    size_t nval;
-    size_t need_bytes;
-    int failed;
-    int workers;
 
-    if (block_count == 0) {
-        return SZFP_OK;
-    }
 
-    if (blocks == NULL || out == NULL) {
-        return SZFP_ERR_NULL;
-    }
-
-    if (!block_layout(block_dim, rate, &nval, &need_bytes)) {
-        return SZFP_ERR_ARG;
-    }
-
-    if (block_nbytes != need_bytes) {
-        return SZFP_ERR_SIZE;
-    }
-
-    workers = threads > 0 ? threads : 1;
-    failed = 0;
-
-#ifdef _OPENMP
-    if (threads <= 0) {
-        workers = omp_get_max_threads();
-    }
-#pragma omp parallel for reduction(| : failed) schedule(static) num_threads(workers)
-#endif
-    for (size_t bid = 0; bid < block_count; bid++) {
-        if (decode_block(
-                blocks + bid * block_nbytes,
-                block_nbytes,
-                rate,
-                block_dim,
-                out + bid * nval
-            ) != SZFP_OK) {
-            failed = 1;
-        }
-    }
-
-    return failed ? SZFP_ERR_ZFP : SZFP_OK;
-}
-
-int szfp_merge_ranges(
-    const uint32_t* chunk_ids,
-    const uint32_t* block_ids,
-    size_t n,
-    size_t gap_blocks,
-    uint32_t* out_chunk,
-    uint64_t* out_first,
-    uint64_t* out_last,
-    uint64_t* out_item_start,
-    size_t* out_n
-) {
-    size_t m = 0;
-
-    if (out_n == NULL) {
-        return SZFP_ERR_NULL;
-    }
-
-    *out_n = 0;
-
-    if (n == 0) {
-        return SZFP_OK;
-    }
-
-    if (chunk_ids == NULL || block_ids == NULL || out_chunk == NULL ||
-        out_first == NULL || out_last == NULL || out_item_start == NULL) {
-        return SZFP_ERR_NULL;
-    }
-
-    out_chunk[0] = chunk_ids[0];
-    out_first[0] = block_ids[0];
-    out_last[0] = block_ids[0];
-    out_item_start[0] = 0;
-
-    for (size_t i = 1; i < n; i++) {
-        if (chunk_ids[i] < chunk_ids[i - 1] ||
-            (chunk_ids[i] == chunk_ids[i - 1] && block_ids[i] <= block_ids[i - 1])) {
-            return SZFP_ERR_ARG;
-        }
-
-        if (chunk_ids[i] == out_chunk[m] &&
-            (uint64_t)block_ids[i] <= out_last[m] + (uint64_t)gap_blocks + 1u) {
-            out_last[m] = block_ids[i];
-            continue;
-        }
-
-        m++;
-        out_chunk[m] = chunk_ids[i];
-        out_first[m] = block_ids[i];
-        out_last[m] = block_ids[i];
-        out_item_start[m] = i;
-    }
-
-    *out_n = m + 1;
-    return SZFP_OK;
-}
-
-int szfp_count_offsets(
+int szfp_count_offsets_range(
     const unsigned char* buf,
     size_t buf_size,
     const uint64_t* offsets,
@@ -656,7 +436,8 @@ int szfp_count_offsets(
     size_t block_nbytes,
     double rate,
     int block_dim,
-    double threshold,
+    double lo,
+    double hi,
     size_t* out_count
 ) {
     size_t nval;
@@ -701,7 +482,7 @@ int szfp_count_offsets(
             szfp_fast_decode(buf + offsets[i], block_nbytes, vals);
 
             for (size_t k = 0; k < nval; k++) {
-                count += (double)vals[k] > threshold;
+                count += in_range(vals[k], lo, hi);
             }
         }
     } else {
@@ -725,7 +506,7 @@ int szfp_count_offsets(
             zfp_decode_block_float_3(zfp, vals);
 
             for (size_t k = 0; k < nval; k++) {
-                count += (double)vals[k] > threshold;
+                count += in_range(vals[k], lo, hi);
             }
         }
 
@@ -736,3 +517,4 @@ int szfp_count_offsets(
     *out_count = count;
     return SZFP_OK;
 }
+

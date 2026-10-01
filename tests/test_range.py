@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pytest
 
-from skipzfp import query
+from skipzfp import query, range_query
 
 from helpers import LAYERS, make_array, smooth_field
 
@@ -54,7 +54,7 @@ def bounds(a):
 def test_range_matches_brute_force(data, name, k, gap):
     a, arrs, dec, _ = data
     lo, hi = bounds(a)[k]
-    r = query.query_range(arrs[name], lo, hi, merge_gap_blocks=gap)
+    r = range_query.query_range(arrs[name], lo, hi, merge_gap_blocks=gap)
     assert r.count == brute(dec[name], lo, hi)
     assert r.in_blocks + r.out_blocks + r.maybe_blocks == r.total_blocks
 
@@ -65,7 +65,7 @@ def test_inclusive_ends_on_values_that_occur(data, lo_inc, hi_inc):
     _, arrs, dec, _ = data
     v = np.unique(dec["plain"])
     lo, hi = float(v[len(v) // 3]), float(v[len(v) // 3 + 50])
-    r = query.query_range(
+    r = range_query.query_range(
         arrs["plain"], lo, hi, lo_inclusive=lo_inc, hi_inclusive=hi_inc
     )
     assert r.count == brute(dec["plain"], lo, hi, lo_inc, hi_inc)
@@ -74,9 +74,9 @@ def test_inclusive_ends_on_values_that_occur(data, lo_inc, hi_inc):
 def test_single_value_and_empty_ranges(data):
     _, arrs, dec, _ = data
     x = float(np.unique(dec["plain"])[1000])
-    point = query.query_range(arrs["plain"], x, x, lo_inclusive=True)
+    point = range_query.query_range(arrs["plain"], x, x, lo_inclusive=True)
     assert point.count == int((dec["plain"] == x).sum()) > 0
-    assert query.query_range(arrs["plain"], x, x).count == 0
+    assert range_query.query_range(arrs["plain"], x, x).count == 0
 
 
 @pytest.mark.parametrize("k", range(len(LAYERS)))
@@ -84,7 +84,7 @@ def test_single_value_and_empty_ranges(data):
 def test_range_on_each_layer(data, k, max_req):
     a, arrs, _, plain = data
     lo, hi = float(np.quantile(a, 0.25)), float(np.quantile(a, 0.6))
-    r = query.query_range(
+    r = range_query.query_range(
         arrs["layers"], lo, hi, layer=k, merge_gap_blocks=4, max_chunk_requests=max_req
     )
     assert r.count == brute(plain[LAYERS[k]], lo, hi)
@@ -94,7 +94,7 @@ def test_gt_is_the_open_upper_range(data):
     a, arrs, _, _ = data
     t = float(np.quantile(a, 0.8))
     gt = query.query_gt(arrs["sub_t"], t)
-    rng = query.query_range(arrs["sub_t"], lo=t)
+    rng = range_query.query_range(arrs["sub_t"], lo=t)
     assert (gt.count, gt.maybe_blocks, gt.in_blocks) == (
         rng.count,
         rng.maybe_blocks,
@@ -105,8 +105,8 @@ def test_gt_is_the_open_upper_range(data):
 def test_below_and_at_or_above_add_up(data):
     a, arrs, dec, _ = data
     t = float(np.unique(dec["plain"])[5000])
-    below = query.query_range(arrs["plain"], hi=t, hi_inclusive=False).count
-    at_or_above = query.query_range(arrs["plain"], lo=t, lo_inclusive=True).count
+    below = range_query.query_range(arrs["plain"], hi=t, hi_inclusive=False).count
+    at_or_above = range_query.query_range(arrs["plain"], lo=t, lo_inclusive=True).count
     assert below + at_or_above == a.size
 
 
@@ -116,7 +116,7 @@ def test_below_and_at_or_above_add_up(data):
 def test_bad_bounds(data, lo, hi):
     _, arrs, _, _ = data
     with pytest.raises(ValueError):
-        query.query_range(arrs["plain"], lo, hi)
+        range_query.query_range(arrs["plain"], lo, hi)
 
 
 @pytest.mark.parametrize("x", (1.1, 0.5, -3.25, 1e-40))
@@ -126,8 +126,8 @@ def test_range_bounds_use_float32_neighbours(x):
     if float(f) < x:
         f = np.nextafter(f, np.float32(np.inf))
     below = float(np.nextafter(f, np.float32(-np.inf)))
-    a, b = query.range_bounds(x, x, lo_inclusive=True, hi_inclusive=False)
+    a, b = range_query.range_bounds(x, x, lo_inclusive=True, hi_inclusive=False)
     assert a == below  # x >= value  <=>  value > below
     assert b == below  # x <  value  <=>  value <= below
-    assert query.range_bounds(x, x) == (x, x)
-    assert query.range_bounds(None, None) == (-math.inf, math.inf)
+    assert range_query.range_bounds(x, x) == (x, x)
+    assert range_query.range_bounds(None, None) == (-math.inf, math.inf)
