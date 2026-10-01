@@ -1,4 +1,12 @@
 from .codec import SkipZFPCodec, write_meta
 from .query import QueryResult, open_skipzfp, query_gt
+from .range_query import query_range
 
-__all__ = ["SkipZFPCodec", "QueryResult", "open_skipzfp", "query_gt", "write_meta"]
+__all__ = [
+    "SkipZFPCodec",
+    "QueryResult",
+    "open_skipzfp",
+    "query_gt",
+    "query_range",
+    "write_meta",
+]
