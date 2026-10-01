@@ -116,8 +116,7 @@ def test_below_and_at_or_above_add_up(data):
 @pytest.mark.parametrize(
     "lo, hi", ((2.0, 1.0), (math.nan, 1.0), (0.0, math.nan)), ids=("order", "lo", "hi")
 )
-def test_bad_bounds(data, lo, hi):
-    """query_range rejects lo > hi and NaN bounds with ValueError."""
+def test_rejects_nan_or_reversed_bounds(data, lo, hi):
     _, arrs, _, _ = data
     with pytest.raises(ValueError):
         range_query.query_range(arrs["plain"], lo, hi)

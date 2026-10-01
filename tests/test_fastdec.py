@@ -80,11 +80,10 @@ def test_count_offsets_same_with_and_without_fast_path(lib, mode):
     assert got.value == ref.value > 0
 
 
-def test_fast_ok_limits(lib):
-    """szfp_fast_ok accepts exactly the layouts the fast decoder supports.
+def test_fast_ok_only_for_supported_layouts(lib):
+    """Supported means 4x4x4 blocks of 2 to 256 bytes that match the rate.
 
-    Those are 4x4x4 blocks of 2 to 256 bytes that match the rate, and none at all
-    once the fast path is turned off.
+    Once the fast path is turned off, no layout is supported at all.
     """
     lib.szfp_set_fast_decode(FAST)
     assert lib.szfp_fast_ok(4, 8.0, 64)

@@ -83,24 +83,13 @@ def plan(lib, meta, units, subs, lo, hi, gt=False):
     n = int(np.prod(units)) * NBLK
     chunks = np.empty(n, np.uint32)
     blocks = np.empty(n, np.uint32)
-    outs = [ctypes.c_size_t() for _ in range(3)]
+    counts = [ctypes.c_size_t() for _ in range(3)]
     bounds = (lo,) if gt else (lo, hi)
     fn = lib.szfp_plan_gt_chunks if gt else lib.szfp_plan_range_chunks
-    rc = fn(
-        ptr(meta),
-        META,
-        *units,
-        *subs,
-        NBLK,
-        *bounds,
-        1,
-        ptr(chunks),
-        ptr(blocks),
-        n,
-        *(ctypes.byref(o) for o in outs),
-    )
-    assert rc == OK
-    m, n_in, n_out = (o.value for o in outs)
+    head = (ptr(meta), META, *units, *subs, NBLK)
+    outs = (ptr(chunks), ptr(blocks), n, *(ctypes.byref(c) for c in counts))
+    assert fn(*head, *bounds, 1, *outs) == OK
+    m, n_in, n_out = (c.value for c in counts)
     return chunks[:m], blocks[:m], n_in, n_out
 
 
@@ -124,20 +113,10 @@ def test_count_offsets_range_matches_numpy(lib, encoded, mode):
     _, buf, full = encoded
     lib.szfp_set_fast_decode(mode)
     offs = np.arange(0, len(full), 5, dtype=np.uint64) * np.uint64(NB)
+    args = (ptr(buf), buf.size, ptr(offs), len(offs), NB, RATE, 4)
     for lo, hi in ranges(full):
         cnt = ctypes.c_size_t()
-        rc = lib.szfp_count_offsets_range(
-            ptr(buf),
-            buf.size,
-            ptr(offs),
-            len(offs),
-            NB,
-            RATE,
-            4,
-            lo,
-            hi,
-            ctypes.byref(cnt),
-        )
+        rc = lib.szfp_count_offsets_range(*args, lo, hi, ctypes.byref(cnt))
         assert rc == OK and cnt.value == brute(full[::5], lo, hi)
 
 
@@ -204,67 +183,25 @@ def error_cases(buf):
     offs = np.zeros(1, np.uint64)
     past_end = offs + np.uint64(buf.size)
     KEEP[:] = [meta, ids, offs, past_end]
-    outs = (ptr(ids), ptr(ids), NBLK, _out(), _out(), _out())
 
     def plan_args(units=(1, 1, 1), subs=(1, 1, 1), size=META, nblk=NBLK, cap=NBLK):
-        return (
-            ptr(meta),
-            size,
-            *units,
-            *subs,
-            nblk,
-            0.0,
-            INF,
-            1,
-            *outs[:2],
-            cap,
-            *outs[3:],
-        )
+        head = (ptr(meta), size, *units, *subs, nblk, 0.0, INF, 1)
+        return (*head, ptr(ids), ptr(ids), cap, _out(), _out(), _out())
+
+    def plan_null():
+        head = (None, META, 1, 1, 1, 1, 1, 1, NBLK, 0.0, INF, 1)
+        return (*head, None, None, 0, _out(), _out(), _out())
 
     def count_args(nb=NB, rate=RATE, out=True, blocks=True):
         src = ptr(buf) if blocks else None
         return (src, 1, nb, rate, 4, 0.0, INF, 1, _out() if out else None)
 
     def offs_args(nb=NB, rate=RATE, dim=4, at=offs, out=True, src=True):
-        b = ptr(buf) if src else None
-        return (
-            b,
-            buf.size,
-            ptr(at),
-            1,
-            nb,
-            rate,
-            dim,
-            0.0,
-            INF,
-            _out() if out else None,
-        )
+        head = (ptr(buf) if src else None, buf.size, ptr(at), 1, nb, rate, dim)
+        return (*head, 0.0, INF, _out() if out else None)
 
     return {
-        "plan null": (
-            "szfp_plan_range_chunks",
-            (
-                None,
-                META,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                NBLK,
-                0.0,
-                INF,
-                1,
-                None,
-                None,
-                0,
-                _out(),
-                _out(),
-                _out(),
-            ),
-            ERR_NULL,
-        ),
+        "plan null": ("szfp_plan_range_chunks", plan_null(), ERR_NULL),
         "plan zero sub": ("szfp_plan_range_chunks", plan_args(subs=(0, 1, 1)), ERR_ARG),
         "plan ragged": (
             "szfp_plan_range_chunks",

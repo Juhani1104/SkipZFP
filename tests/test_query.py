@@ -146,7 +146,7 @@ def test_query_by_path(one):
     assert res.count == int((rec > 285.0).sum())
 
 
-def test_memory_store():
+def test_query_on_memory_store():
     a = smooth_field(shape=(128, 32, 64), seed=9)
     g = zarr.open_group(zarr.storage.MemoryStore(), mode="w")
     z = g.create_array(

@@ -171,19 +171,8 @@ def main(raw, out_path):
                 ]
                 bg = bq.transpose(0, 3, 1, 4, 2, 5).reshape(-1, 32, 64)
                 by, bx = y // 4, x // 4
-                cv = np.repeat(
-                    np.repeat(
-                        np.repeat(
-                            bg[:, by : (y + h - 1) // 4 + 1, bx : (x + w - 1) // 4 + 1],
-                            4,
-                            0,
-                        ),
-                        4,
-                        1,
-                    ),
-                    4,
-                    2,
-                )
+                cell = bg[:, by : (y + h - 1) // 4 + 1, bx : (x + w - 1) // 4 + 1]
+                cv = cell.repeat(4, 0).repeat(4, 1).repeat(4, 2)
                 cv = cv[:, y - by * 4 : y - by * 4 + h, x - bx * 4 : x - bx * 4 + w]
                 got = dict(
                     AVG=float(rr.mean()), MIN=float(rr.min()), MAX=float(rr.max())
