@@ -41,7 +41,7 @@ def test_single_block_decode_is_bit_exact(rate):
         assert np.array_equal(decode_one_block(buf, bid, rate), full[bid])
 
 
-def test_constant_chunk():
+def test_constant_chunk_round_trips():
     """A chunk with a single value round-trips with all block offsets at zero.
 
     Its min equals its max, a case the zone map handles separately because the

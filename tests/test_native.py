@@ -175,6 +175,16 @@ def edge_cases(buf, a):
     KEEP[:] = [f, meta, ids, zeros, u64, out_ids]
     x, y, z = SHAPE
     nan, inf = float("nan"), float("inf")
+
+    def plan(n_chunk=1, size=1036, cap=512):
+        # f is large enough for 512 ids, so the outputs are always valid
+        head = (ptr(meta), n_chunk, size, 512, 0.0, 1)
+        return (*head, ptr(f), ptr(f), cap, _out(), _out(), _out())
+
+    def merge(out_n=True):
+        outs = (ptr(out_ids), ptr(u64), ptr(u64), ptr(u64))
+        return (ptr(zeros), ptr(ids), 2, 0, *outs, _out() if out_n else None)
+
     return {
         "layout nan rate": ("szfp_layout", (x, y, z, nan, 4, _out(), _out())),
         "layout inf rate": ("szfp_layout", (x, y, z, inf, 4, _out(), _out())),
@@ -222,57 +232,9 @@ def edge_cases(buf, a):
             "szfp_decode_block",
             (ptr(buf), NB, RATE, 3, 5, ptr(f)),
         ),
-        "plan zero chunks": (
-            "szfp_plan_gt",
-            (
-                ptr(meta),
-                0,
-                1036,
-                512,
-                0.0,
-                1,
-                ptr(u64),
-                ptr(u64),
-                0,
-                _out(),
-                _out(),
-                _out(),
-            ),
-        ),
-        "plan small cap": (
-            "szfp_plan_gt",
-            (
-                ptr(meta),
-                1,
-                1036,
-                512,
-                0.0,
-                1,
-                ptr(u64),
-                ptr(u64),
-                1,
-                _out(),
-                _out(),
-                _out(),
-            ),
-        ),
-        "plan wrong meta size": (
-            "szfp_plan_gt",
-            (
-                ptr(meta),
-                1,
-                1000,
-                512,
-                0.0,
-                1,
-                ptr(f),
-                ptr(f),
-                512,
-                _out(),
-                _out(),
-                _out(),
-            ),
-        ),
+        "plan zero chunks": ("szfp_plan_gt", plan(n_chunk=0, cap=0)),
+        "plan small cap": ("szfp_plan_gt", plan(cap=1)),
+        "plan wrong meta size": ("szfp_plan_gt", plan(size=1000)),
         "count_gt bad rate": (
             "szfp_count_gt_blocks",
             (ptr(buf), 1, NB, 0.0, 4, 0.0, 1, _out()),
@@ -293,34 +255,8 @@ def edge_cases(buf, a):
             "szfp_decode_blocks",
             (ptr(buf), 1, NB - 1, RATE, 4, 1, ptr(f)),
         ),
-        "merge unsorted": (
-            "szfp_merge_ranges",
-            (
-                ptr(zeros),
-                ptr(ids),
-                2,
-                0,
-                ptr(out_ids),
-                ptr(u64),
-                ptr(u64),
-                ptr(u64),
-                _out(),
-            ),
-        ),
-        "merge null out_n": (
-            "szfp_merge_ranges",
-            (
-                ptr(zeros),
-                ptr(ids),
-                2,
-                0,
-                ptr(out_ids),
-                ptr(u64),
-                ptr(u64),
-                ptr(u64),
-                None,
-            ),
-        ),
+        "merge unsorted": ("szfp_merge_ranges", merge()),
+        "merge null out_n": ("szfp_merge_ranges", merge(out_n=False)),
         "count_offsets null out": (
             "szfp_count_offsets",
             (ptr(buf), buf.size, ptr(u64), 1, NB, RATE, 4, 0.0, None),
@@ -398,7 +334,7 @@ def test_decode_block_any_dimension(lib, dims):
     assert lib.szfp_decode_block(ptr(src), src.size, RATE, 3, dims, ptr(out)) == OK
 
 
-def test_threads_zero_uses_all_cores(lib, encoded):
+def test_threads_zero_is_still_correct(lib, encoded):
     """Passing threads=0, which uses all cores, still decodes and counts correctly."""
     _, buf, full = encoded
     n = len(full)

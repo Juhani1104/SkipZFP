@@ -56,7 +56,7 @@ def test_config_persists_in_zarr_json(tmp_path, kw):
         (dict(block_dim=8), "block_dim=4"),
     ],
 )
-def test_invalid_config(kw, msg):
+def test_rejects_invalid_config(kw, msg):
     with pytest.raises(ValueError, match=msg):
         SkipZFPCodec(**kw)
 
