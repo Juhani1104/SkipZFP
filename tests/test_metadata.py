@@ -1,3 +1,5 @@
+"""The zone map bounds the original and decoded values, and write_meta stores it."""
+
 import numpy as np
 import pytest
 import zarr

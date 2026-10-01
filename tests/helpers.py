@@ -1,3 +1,5 @@
+"""Shared data and helpers for the tests."""
+
 import ctypes
 
 import numpy as np
@@ -15,6 +17,7 @@ ORDERS = ((0, 1, 2), (1, 2, 0), (2, 0, 1))
 
 
 def smooth_field(shape=SHAPE, seed=0):
+    """Return a smooth float32 field with a little noise, like temperature data."""
     rng = np.random.default_rng(seed)
     i, j, k = np.indices(shape)
     a = 280 + 10 * np.sin(k / 5) + 8 * np.cos(j / 3) + 3 * np.sin(i / 7)
@@ -29,6 +32,10 @@ def true_blocks(a):
 
 
 def split(a, rate):
+    """Encode a at rate and return the payload with its zone map record unpacked.
+
+    The record comes back as the min, max, error bound and per-block offsets.
+    """
     buf = codec.native().encode(a, rate, 4)
     meta = codec.native().meta(a, rate, 4)
     cmin, cmax, eps = np.frombuffer(meta[:12].tobytes(), np.float32)
@@ -37,6 +44,7 @@ def split(a, rate):
 
 
 def decode_one_block(payload, block_id, rate):
+    """Decode one block of a payload through szfp_decode_block."""
     nbytes = int(64 * rate / 8)
     out = np.empty(64, np.float32)
     lib = codec.native().lib
@@ -76,6 +84,7 @@ def classify(meta, lt, th):
 
 
 def make_array(path, a, **kw):
+    """Write a to a new SkipZFP array at path and build its zone map."""
     g = zarr.open_group(str(path), mode="w")
     z = g.create_array(
         "data",

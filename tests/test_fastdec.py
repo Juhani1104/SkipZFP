@@ -1,3 +1,5 @@
+"""The fast block decoder gives bit-identical results to libzfp."""
+
 import ctypes
 
 import numpy as np
@@ -79,6 +81,11 @@ def test_count_offsets_same_with_and_without_fast_path(lib, mode):
 
 
 def test_fast_ok_limits(lib):
+    """szfp_fast_ok accepts exactly the layouts the fast decoder supports.
+
+    Those are 4x4x4 blocks of 2 to 256 bytes that match the rate, and none at all
+    once the fast path is turned off.
+    """
     lib.szfp_set_fast_decode(FAST)
     assert lib.szfp_fast_ok(4, 8.0, 64)
     assert lib.szfp_fast_ok(4, 0.25, 2)

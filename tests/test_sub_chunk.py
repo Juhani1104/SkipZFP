@@ -1,3 +1,5 @@
+"""Arrays with sub_chunk read and query like arrays with small chunks."""
+
 import numpy as np
 import pytest
 import zarr

@@ -1,3 +1,5 @@
+"""Layered arrays read back like plain ones and query correctly at every layer."""
+
 import numpy as np
 import pytest
 import zarr
@@ -27,6 +29,11 @@ def test_layered_full_read_matches_plain(layered, order):
 
 @pytest.mark.parametrize("order", ORDERS)
 def test_layered_meta_eps_covers_each_layer(layered, order):
+    """The error bound stored for each layer covers the real error at that rate.
+
+    For every unit and layer, the stored bound must be at least the largest gap
+    between the original data and the data decoded at that layer's rate.
+    """
     a, ref, arrs = layered
     z = arrs[order]
     meta = zarr.open_array(store=z.store_path.store, path="data_meta", mode="r")[:]

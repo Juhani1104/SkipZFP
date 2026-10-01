@@ -1,3 +1,5 @@
+"""The chunk-order planner matches the older unit-order planner block for block."""
+
 import asyncio
 
 import numpy as np

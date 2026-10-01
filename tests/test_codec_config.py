@@ -1,3 +1,5 @@
+"""How SkipZFPCodec settings are validated, serialized and applied to arrays."""
+
 import json
 
 import numpy as np

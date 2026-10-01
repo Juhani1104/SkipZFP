@@ -1,3 +1,5 @@
+"""query_range matches a brute-force count for every kind of bound."""
+
 import math
 
 import numpy as np
@@ -114,6 +116,7 @@ def test_below_and_at_or_above_add_up(data):
     "lo, hi", ((2.0, 1.0), (math.nan, 1.0), (0.0, math.nan)), ids=("order", "lo", "hi")
 )
 def test_bad_bounds(data, lo, hi):
+    """query_range rejects lo > hi and NaN bounds with ValueError."""
     _, arrs, _, _ = data
     with pytest.raises(ValueError):
         range_query.query_range(arrs["plain"], lo, hi)
@@ -121,6 +124,11 @@ def test_bad_bounds(data, lo, hi):
 
 @pytest.mark.parametrize("x", (1.1, 0.5, -3.25, 1e-40))
 def test_range_bounds_use_float32_neighbours(x):
+    """Inclusive and exclusive bounds map to the float32 just below the bound.
+
+    Decoded values are float32, so x >= v is the same as x > below and x < v the
+    same as x <= below, where below is the largest float32 under v.
+    """
     # smallest float32 >= x, and the float32 just below it
     f = np.float32(x)
     if float(f) < x:
