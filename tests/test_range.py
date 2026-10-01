@@ -4,6 +4,7 @@ import math
 
 import numpy as np
 import pytest
+import zarr
 
 from skipzfp import query, range_query
 
@@ -139,3 +140,41 @@ def test_range_bounds_use_float32_neighbours(x):
     assert b == below  # x <  value  <=>  value <= below
     assert range_query.range_bounds(x, x) == (x, x)
     assert range_query.range_bounds(None, None) == (-math.inf, math.inf)
+
+
+def test_async_matches_sync(data):
+    """query_range_async on an opened array gives the same result as query_range."""
+    _, arrs, _, _ = data
+    z = arrs["plain"]
+    want = range_query.query_range(z, 280.0, 285.0)
+    got = zarr.core.sync.sync(range_query.query_range_async(z, 280.0, 285.0))
+    assert got.count == want.count and got.maybe_blocks == want.maybe_blocks
+
+
+@pytest.mark.parametrize(
+    "kw, msg",
+    [
+        (dict(request_concurrency=0), "request_concurrency"),
+        (dict(request_batch_size=0), "request_batch_size"),
+        (dict(merge_gap_blocks=-1), "merge_gap_blocks"),
+        (dict(layer=1), "layer must be in"),
+        (dict(layer=-1), "layer must be in"),
+    ],
+)
+def test_rejects_bad_query_options(data, kw, msg):
+    _, arrs, _, _ = data
+    with pytest.raises(ValueError, match=msg):
+        range_query.query_range(arrs["plain"], 280.0, 285.0, **kw)
+
+
+def test_async_entry_requires_open_array():
+    with pytest.raises(TypeError, match="opened zarr.Array"):
+        zarr.core.sync.sync(range_query.query_range_async("not-an-array", 0.0, 1.0))
+
+
+def test_plan_chunks_rejects_bad_geometry():
+    """A failing C call surfaces as RuntimeError instead of a bad result."""
+    meta = np.zeros(12 + 2 * 8, dtype=np.uint8)
+    plan = range_query.range_native().plan_chunks
+    with pytest.raises(RuntimeError):
+        plan(meta, 12 + 2 * 8, (2, 1, 1), (3, 1, 1), 8, 0.0, 1.0, 1)
