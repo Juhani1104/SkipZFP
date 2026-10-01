@@ -122,7 +122,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> tuple[int, int]:
-        """Return the payload and zone-map record sizes of a chunk, in bytes."""
+        """Return the byte sizes of a chunk's payload and of its zone map record."""
         data_size = ctypes.c_size_t()
         meta_size = ctypes.c_size_t()
 
@@ -353,24 +353,26 @@ class QueryResult:
     """Answer of a query, plus where its bytes and time went.
 
     Every block is exactly one of IN, OUT or MAYBE, so
-    in_blocks + out_blocks + maybe_blocks == total_blocks.
+    in_blocks + out_blocks + maybe_blocks == total_blocks. The metadata_*
+    fields refer to the zone map, and the payload_* fields to the compressed
+    blocks.
 
     Attributes:
         count: Number of matching values.
-        in_blocks: Blocks whose values all match, counted from metadata.
+        in_blocks: Blocks whose values all match, counted from the zone map.
         out_blocks: Blocks with no matching value, skipped without reading.
         maybe_blocks: Blocks that were read and decoded.
         total_blocks: Blocks in the whole array.
-        metadata_bytes_read: Bytes of zone-map metadata read.
-        payload_bytes_read: Bytes of compressed block data read.
-        metadata_requests: Objects read for the metadata.
-        payload_requests: Range reads issued for block data.
+        metadata_bytes_read: Bytes read from the zone map.
+        payload_bytes_read: Bytes read from the compressed blocks.
+        metadata_requests: Objects read from the zone map.
+        payload_requests: Range reads issued for the compressed blocks.
         useful_payload_bytes: Bytes of the MAYBE blocks themselves.
         payload_overread_bytes: Extra bytes read because nearby reads were
             merged or a whole chunk prefix was fetched.
-        metadata_read_seconds: Time to read the metadata.
+        metadata_read_seconds: Time to read the zone map.
         planning_seconds: Time to classify blocks as IN, OUT or MAYBE.
-        payload_read_seconds: Time to read block data, which with layer 0
+        payload_read_seconds: Time to read the compressed blocks, which with layer 0
             also includes decoding because the two overlap.
         decode_seconds: Time spent decoding, which with layer 0 is summed
             over reads running in parallel and can exceed the wall time.
@@ -396,12 +398,12 @@ class QueryResult:
 
     @property
     def bytes_read(self) -> int:
-        """Total bytes read, metadata plus payload."""
+        """Total bytes read from the zone map and the compressed blocks."""
         return self.metadata_bytes_read + self.payload_bytes_read
 
     @property
     def range_requests(self) -> int:
-        """Total read requests, metadata plus payload."""
+        """Total read requests for the zone map and the compressed blocks."""
         return self.metadata_requests + self.payload_requests
 
 
@@ -414,7 +416,7 @@ class _Layout:
     rate: float
     block_dim: int
     data_size: int  # payload bytes per chunk
-    meta_size: int  # bytes per zone-map record
+    meta_size: int  # bytes per record in the zone map
     block_size: int  # bytes per block at the full rate
     blocks_per_chunk: int
     values_per_block: int
@@ -728,7 +730,7 @@ def unit_to_chunk(
 
 
 def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
-    """Keep only one layer's error bound in each zone-map record.
+    """Keep only one layer's error bound in each record of the zone map.
 
     The C planner reads records with a single error bound, so the bounds of
     the other layers are dropped.
@@ -1060,9 +1062,9 @@ def query_gt(
 ) -> QueryResult:
     """Count values greater than threshold in a SkipZFP array.
 
-    Blocks whose zone-map range lies entirely above or below the threshold
-    are counted or skipped from metadata alone, and only the remaining
-    blocks are downloaded and decoded.
+    The zone map shows which blocks lie entirely above or below the
+    threshold, so those blocks are counted or skipped without being read,
+    and only the remaining blocks are downloaded and decoded.
 
     The count equals what you get by decompressing the whole array and
     counting. It can differ slightly from counting the original data,
@@ -1094,8 +1096,8 @@ def query_gt(
 
     Raises:
         ValueError: If the array's shape or chunking is not supported, it
-            does not use the skipzfp codec, it has no zone-map metadata
-            (see :func:`write_meta`), or an argument is out of range.
+            does not use the skipzfp codec, it has no zone map (see
+            :func:`write_meta`), or an argument is out of range.
         RuntimeError: If source is a URL and its fsspec backend is missing.
         FileNotFoundError: If a chunk the query needs is missing.
 

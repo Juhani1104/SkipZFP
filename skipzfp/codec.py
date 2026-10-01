@@ -97,7 +97,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> tuple[int, int]:
-        """Return the payload and zone-map record sizes of a chunk, in bytes."""
+        """Return the byte sizes of a chunk's payload and of its zone map record."""
         data_size = ctypes.c_size_t()
         meta_size = ctypes.c_size_t()
 
@@ -183,7 +183,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> np.ndarray:
-        """Compute the single-layer zone-map record of arr at the given rate."""
+        """Compute the zone map record of arr at one rate, with one error bound."""
         src = np.ascontiguousarray(arr, dtype=np.float32)
         shape = tuple(int(x) for x in src.shape)
         _, meta_size = self.layout(shape, rate, block_dim)
@@ -240,8 +240,8 @@ class SkipZFPCodec(ArrayBytesCodec):
             sit next to each other and a point's time series takes one read.
         sub_chunk: Shape of the units a chunk is split into, or empty to
             keep the whole chunk as one unit. Each unit is encoded on its
-            own with its own zone-map entry, which keeps chunks large (fewer
-            objects) while the zone map stays fine-grained.
+            own with its own entry in the zone map, which keeps chunks large
+            (fewer objects) while the zone map stays fine-grained.
 
     Example:
         >>> group = zarr.open_group("demo.zarr", mode="w")
@@ -506,7 +506,7 @@ def block_rank(
 
 
 def meta_size(codec: SkipZFPCodec, chunk: tuple[int, ...]) -> int:
-    """Return the size in bytes of one zone-map record for a unit.
+    """Return the size in bytes of one unit's record in the zone map.
 
     A record holds the unit's min and max as two float32, one float32 error
     bound per layer, and each block's quantized min and max as two uint8.
@@ -550,11 +550,11 @@ def write_meta(
         arr: An array written with SkipZFPCodec, inside a group.
         data: The original values written to arr.
         path: Where to save the zone map. Defaults to "<arr.path>_meta".
-        t_chunk: Units along the first axis per zone-map chunk.
+        t_chunk: Units along the first axis in each chunk of the zone map.
         threads: Threads used to compute the zone map.
 
     Returns:
-        The zone-map array.
+        The zone map, as a zarr array.
 
     Raises:
         ValueError: If arr does not use SkipZFPCodec, data does not match
