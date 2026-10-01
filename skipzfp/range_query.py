@@ -247,9 +247,10 @@ async def _query_range_async(
     layer: int | None = None,
     max_chunk_requests: int = 1,
 ) -> QueryResult:
-    """Count values with lo < x <= hi. Either bound may be infinite."""
-    # TODO: mirrors query_gt_async line for line, with lo/hi in place of the
-    # threshold. See the comments there. Share the code once range is merged.
+    """Count values with lo < x <= hi, where either bound may be infinite."""
+    # TODO: mirrors query_gt_async line for line with lo/hi in place of the
+    # threshold, so see the comments there. Share the code once range is
+    # merged.
     if not isinstance(arr, zarr.Array):
         raise TypeError("query_range_async expects an opened zarr.Array")
 
@@ -441,11 +442,11 @@ def range_bounds(
         lo: Lower bound, or None for no lower bound.
         hi: Upper bound, or None for no upper bound.
         lo_inclusive: Use lo <= x instead of lo < x.
-        hi_inclusive: Use x <= hi. Set it to False for x < hi.
+        hi_inclusive: Use x <= hi, or x < hi when False.
 
     Returns:
-        (a, b) such that a < x <= b selects the same float32 values. A
-        missing bound becomes -inf or inf.
+        (a, b) such that a < x <= b selects the same float32 values, with
+        a missing bound mapped to -inf or inf.
 
     Raises:
         ValueError: If lo or hi is NaN, or if lo > hi.
@@ -477,9 +478,9 @@ async def query_range_async(
 ) -> QueryResult:
     """Async version of :func:`query_range` for an already opened array.
 
-    Takes the same keyword arguments as :func:`query_range` except
-    array_path and storage_options. Use it to run several queries
-    concurrently.
+    It takes the same keyword arguments as :func:`query_range` except
+    array_path and storage_options, and is useful for running several
+    queries concurrently.
 
     Raises:
         TypeError: If arr is not an opened zarr.Array.
@@ -519,7 +520,7 @@ def query_range(
         lo: Lower bound, or None for no lower bound.
         hi: Upper bound, or None for no upper bound.
         lo_inclusive: Use lo <= x instead of lo < x.
-        hi_inclusive: Use x <= hi. Set it to False for x < hi.
+        hi_inclusive: Use x <= hi, or x < hi when False.
         array_path, storage_options, threads, request_concurrency,
         request_batch_size, merge_gap_blocks, layer, max_chunk_requests:
             Same as in :func:`query_gt`.

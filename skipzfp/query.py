@@ -334,8 +334,8 @@ class QueryResult:
 
     Attributes:
         count: Number of matching values.
-        in_blocks: Blocks whose values all match. Counted from metadata.
-        out_blocks: Blocks with no matching value. Skipped.
+        in_blocks: Blocks whose values all match, counted from metadata.
+        out_blocks: Blocks with no matching value, skipped without reading.
         maybe_blocks: Blocks that were read and decoded.
         total_blocks: Blocks in the whole array.
         metadata_bytes_read: Bytes of zone-map metadata read.
@@ -347,10 +347,10 @@ class QueryResult:
             merged or a whole chunk prefix was fetched.
         metadata_read_seconds: Time to read the metadata.
         planning_seconds: Time to classify blocks as IN, OUT or MAYBE.
-        payload_read_seconds: Time to read block data. With layer 0,
-            decoding overlaps the reads and is included here.
-        decode_seconds: Time spent decoding. With layer 0 it is summed over
-            reads running in parallel, so it can exceed the wall time.
+        payload_read_seconds: Time to read block data, which with layer 0
+            also includes decoding because the two overlap.
+        decode_seconds: Time spent decoding, which with layer 0 is summed
+            over reads running in parallel and can exceed the wall time.
         total_seconds: Wall time of the whole query.
     """
 
@@ -426,8 +426,8 @@ def open_skipzfp(
 ) -> zarr.Array:
     """Open an array for reading, or return it as is if already opened.
 
-    It does not check that the array uses the skipzfp codec. The query
-    functions do that.
+    It does not check that the array uses the skipzfp codec, since the
+    query functions do that.
 
     Args:
         source: An opened zarr.Array, or a local path, URL or store that
@@ -770,8 +770,9 @@ async def query_gt_async(
 ) -> QueryResult:
     """Async version of query_gt for an already opened array.
 
-    Takes the same keyword arguments as :func:`query_gt` except array_path and
-    storage_options. Use it to run several queries concurrently.
+    It takes the same keyword arguments as :func:`query_gt` except
+    array_path and storage_options, and is useful for running several
+    queries concurrently.
 
     Raises:
         TypeError: If arr is not an opened zarr.Array.
@@ -991,8 +992,8 @@ def query_gt(
     """Count values greater than threshold in a SkipZFP array.
 
     Blocks whose zone-map range lies entirely above or below the threshold
-    are counted or skipped from metadata alone. Only the remaining blocks
-    are downloaded and decoded.
+    are counted or skipped from metadata alone, and only the remaining
+    blocks are downloaded and decoded.
 
     The count equals what you get by decompressing the whole array and
     counting. It can differ slightly from counting the original data,
@@ -1005,16 +1006,16 @@ def query_gt(
             not an opened array.
         storage_options: Options for a cloud store, such as credentials,
             passed to fsspec when source is a URL.
-        threads: C threads for planning, and for decoding when layer > 0.
-            0 uses all cores.
+        threads: C threads for planning, and for decoding when layer > 0,
+            where 0 uses all cores.
         request_concurrency: Maximum number of reads in flight at once.
-        request_batch_size: When layer > 0, number of reads issued per
-            batch. Defaults to 4 * request_concurrency.
+        request_batch_size: Number of reads issued per batch when
+            layer > 0, 4 * request_concurrency by default.
         merge_gap_blocks: Merge two reads in the same chunk when at most
-            this many unneeded blocks lie between them. Larger values mean
-            fewer requests but more bytes read.
-        layer: Precision layer to read, 0 being the lowest rate. None reads
-            the full rate. Only matters for arrays written with layers.
+            this many unneeded blocks lie between them, so larger values
+            mean fewer requests but more bytes read.
+        layer: Precision layer to read for arrays written with layers,
+            where 0 is the lowest rate and None reads the full rate.
         max_chunk_requests: When layer > 0, a chunk that would need more
             than this many reads is fetched in a single read instead.
 
