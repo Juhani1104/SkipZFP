@@ -130,7 +130,6 @@ static int decode_block(
     return ret == 0 ? SZFP_ERR_ZFP : SZFP_OK;
 }
 
-
 /* classify the blocks of one metadata unit for lo < x <= hi:
  * 0 = OUT, 1 = IN, 2 = MAYBE */
 static void classify_unit(
@@ -427,7 +426,6 @@ int szfp_count_range_blocks(
     return SZFP_OK;
 }
 
-
 int szfp_count_offsets_range(
     const unsigned char* buf,
     size_t buf_size,
@@ -517,4 +515,3 @@ int szfp_count_offsets_range(
     *out_count = count;
     return SZFP_OK;
 }
-
