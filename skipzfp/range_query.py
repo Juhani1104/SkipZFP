@@ -33,6 +33,8 @@ from .query import (
 
 
 class _RangeNative:
+    """ctypes bindings for csrc/range.c, the range versions of query._Native."""
+
     def __init__(self, lib: ctypes.CDLL) -> None:
         self.lib = lib
 
@@ -208,6 +210,7 @@ async def stream_count_range(
     hi: float,
     concurrency: int,
 ) -> tuple[int, int, float]:
+    """Range version of query.stream_count."""
     loop = asyncio.get_running_loop()
     sem = asyncio.Semaphore(concurrency)
 
@@ -244,7 +247,9 @@ async def _query_range_async(
     layer: int | None = None,
     max_chunk_requests: int = 1,
 ) -> QueryResult:
-    """Count values with lo < x <= hi (either bound may be infinite)."""
+    """Count values with lo < x <= hi. Either bound may be infinite."""
+    # TODO: mirrors query_gt_async line for line, with lo/hi in place of the
+    # threshold. See the comments there. Share the code once range is merged.
     if not isinstance(arr, zarr.Array):
         raise TypeError("query_range_async expects an opened zarr.Array")
 
@@ -431,6 +436,19 @@ def range_bounds(
 
     Decoded values are float32, so x >= a is exactly x > (largest float32 < a),
     and x < b is exactly x <= (largest float32 < b).
+
+    Args:
+        lo: Lower bound, or None for no lower bound.
+        hi: Upper bound, or None for no upper bound.
+        lo_inclusive: Use lo <= x instead of lo < x.
+        hi_inclusive: Use x <= hi. Set it to False for x < hi.
+
+    Returns:
+        (a, b) such that a < x <= b selects the same float32 values. A
+        missing bound becomes -inf or inf.
+
+    Raises:
+        ValueError: If lo or hi is NaN, or if lo > hi.
     """
     for name, v in (("lo", lo), ("hi", hi)):
         if v is not None and math.isnan(v):
@@ -457,10 +475,14 @@ async def query_range_async(
     hi_inclusive: bool = True,
     **kwargs: Any,
 ) -> QueryResult:
-    """Count values between lo and hi; None leaves that side open.
+    """Async version of :func:`query_range` for an already opened array.
 
-    By default the range is lo < x <= hi; lo_inclusive / hi_inclusive switch
-    each end between < and <=. query_range_async(arr, hi=T) counts x <= T.
+    Takes the same keyword arguments as :func:`query_range` except
+    array_path and storage_options. Use it to run several queries
+    concurrently.
+
+    Raises:
+        TypeError: If arr is not an opened zarr.Array.
     """
     a, b = range_bounds(lo, hi, lo_inclusive, hi_inclusive)
     return await _query_range_async(arr, a, b, **kwargs)
@@ -482,7 +504,37 @@ def query_range(
     layer: int | None = None,
     max_chunk_requests: int = 1,
 ) -> QueryResult:
-    """Count values between lo and hi; see query_range_async for the bounds."""
+    """Count values in a range, by default lo < x <= hi.
+
+    This function works like :func:`query_gt`. It uses the zone map to
+    count or skip whole blocks, and decodes only the blocks that lie
+    partly inside the range.
+
+    The count equals what you get by decompressing the whole array and
+    counting. It can differ slightly from counting the original data,
+    because ZFP compression is lossy.
+
+    Args:
+        source: An opened zarr.Array, or a local path or URL to open.
+        lo: Lower bound, or None for no lower bound.
+        hi: Upper bound, or None for no upper bound.
+        lo_inclusive: Use lo <= x instead of lo < x.
+        hi_inclusive: Use x <= hi. Set it to False for x < hi.
+        array_path, storage_options, threads, request_concurrency,
+        request_batch_size, merge_gap_blocks, layer, max_chunk_requests:
+            Same as in :func:`query_gt`.
+
+    Returns:
+        QueryResult, as in :func:`query_gt`.
+
+    Raises:
+        ValueError: If lo or hi is NaN, if lo > hi, or in any case where
+            :func:`query_gt` raises it.
+
+    Example:
+        >>> query_range("data/t2m.zarr", 290.0, 295.0).count  # 290 < x <= 295
+        >>> query_range("data/t2m.zarr", hi=273.15, hi_inclusive=False).count
+    """
     arr = open_skipzfp(source, array_path=array_path, storage_options=storage_options)
     a, b = range_bounds(lo, hi, lo_inclusive, hi_inclusive)
     return sync(
