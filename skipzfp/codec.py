@@ -31,6 +31,8 @@ _ERR = {
 
 
 class _Native:
+    """ctypes bindings for the codec functions in csrc/core.c."""
+
     def __init__(self) -> None:
         self.lib = load_library()
 
@@ -95,6 +97,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> tuple[int, int]:
+        """Return the payload and zone-map record sizes of a chunk, in bytes."""
         data_size = ctypes.c_size_t()
         meta_size = ctypes.c_size_t()
 
@@ -116,6 +119,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> np.ndarray:
+        """Compress arr with fixed-rate ZFP, with blocks in C order."""
         src = np.ascontiguousarray(arr, dtype=np.float32)
         shape = tuple(int(x) for x in src.shape)
 
@@ -154,6 +158,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> np.ndarray:
+        """Decompress fixed-rate ZFP bytes into a float32 array of shape."""
         src = np.ascontiguousarray(buf, dtype=np.uint8).reshape(-1)
         out = np.empty(shape, dtype=np.float32)
 
@@ -178,6 +183,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> np.ndarray:
+        """Compute the single-layer zone-map record of arr at the given rate."""
         src = np.ascontiguousarray(arr, dtype=np.float32)
         shape = tuple(int(x) for x in src.shape)
         _, meta_size = self.layout(shape, rate, block_dim)

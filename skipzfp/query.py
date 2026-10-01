@@ -27,6 +27,8 @@ FUSED_PLAN = True
 
 
 class _Native:
+    """ctypes bindings for the query functions in csrc/query.c."""
+
     def __init__(self) -> None:
         self.lib = load_library()
 
@@ -120,6 +122,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> tuple[int, int]:
+        """Return the payload and zone-map record sizes of a chunk, in bytes."""
         data_size = ctypes.c_size_t()
         meta_size = ctypes.c_size_t()
 
@@ -145,6 +148,11 @@ class _Native:
         th: float,
         threads: int,
     ) -> tuple[np.ndarray, np.ndarray, int, int]:
+        """Classify blocks with the older unit-order planner.
+
+        It returns the MAYBE blocks as (unit, rank) pairs, plus the IN and
+        OUT counts. :func:`unit_to_chunk` turns the pairs into chunk order.
+        """
         src = np.ascontiguousarray(meta, dtype=np.uint8)
         cap = n_chunk * n_block
         chunk_ids = np.empty(cap, dtype=np.uint32)
@@ -188,6 +196,11 @@ class _Native:
         th: float,
         threads: int,
     ) -> tuple[np.ndarray, np.ndarray, int, int]:
+        """Classify blocks for x > th and return the MAYBE blocks in chunk order.
+
+        It returns the (chunk, block) ids of the MAYBE blocks, plus the IN
+        and OUT counts.
+        """
         src = np.ascontiguousarray(meta, dtype=np.uint8)
         cap = int(np.prod(unit_grid)) * blocks_per_unit
         chunk_ids = np.empty(cap, dtype=np.uint32)
@@ -227,6 +240,7 @@ class _Native:
         th: float,
         threads: int,
     ) -> int:
+        """Decode n_block packed blocks and count values greater than th."""
         if n_block == 0:
             return 0
 
@@ -252,6 +266,12 @@ class _Native:
         block_ids: np.ndarray,
         gap: int,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Group sorted (chunk, block) ids into runs that can share one read.
+
+        A run may skip up to gap blocks between two ids. For each run it
+        returns the chunk, the first and last block, and the index of its
+        first id.
+        """
         n = len(block_ids)
         ch = np.ascontiguousarray(chunk_ids, dtype=np.uint32)
         bl = np.ascontiguousarray(block_ids, dtype=np.uint32)
@@ -285,6 +305,7 @@ class _Native:
         block_dim: int,
         th: float,
     ) -> int:
+        """Decode the blocks at the given byte offsets in data and count x > th."""
         offs = np.ascontiguousarray(offsets, dtype=np.uint64)
         out = ctypes.c_size_t()
 
@@ -308,6 +329,7 @@ _POOL: ThreadPoolExecutor | None = None
 
 
 def pool() -> ThreadPoolExecutor:
+    """Return the shared thread pool that decodes reads as they arrive."""
     global _POOL
 
     if _POOL is None:
@@ -317,6 +339,7 @@ def pool() -> ThreadPoolExecutor:
 
 
 def native() -> _Native:
+    """Return the shared _Native, loading the C library on first use."""
     global _NATIVE
 
     if _NATIVE is None:
@@ -384,25 +407,29 @@ class QueryResult:
 
 @dataclass(frozen=True)
 class _Layout:
+    """Shapes and byte sizes of a SkipZFP array, computed once per query."""
+
     chunk_shape: tuple[int, int, int]
-    grid_shape: tuple[int, int, int]
+    grid_shape: tuple[int, int, int]  # chunks along each axis
     rate: float
     block_dim: int
-    data_size: int
-    meta_size: int
-    block_size: int
+    data_size: int  # payload bytes per chunk
+    meta_size: int  # bytes per zone-map record
+    block_size: int  # bytes per block at the full rate
     blocks_per_chunk: int
     values_per_block: int
     layers: tuple[float, ...]
     layer_bytes: tuple[int, ...]
-    layer_starts: tuple[int, ...]
+    layer_starts: tuple[int, ...]  # byte offset of each layer in a chunk
     unit_shape: tuple[int, int, int]
-    unit_grid: tuple[int, int, int]
+    unit_grid: tuple[int, int, int]  # units along each axis of the array
     blocks_per_unit: int
 
 
 @dataclass(frozen=True)
 class _Range:
+    """Byte range [start, end) of one stored object."""
+
     key: str
     start: int
     end: int
@@ -410,12 +437,14 @@ class _Range:
 
 @dataclass(frozen=True)
 class _MergedRange:
+    """One read covering a run of MAYBE blocks in a chunk."""
+
     key: str
     start: int
     end: int
-    first_block: int
-    item_start: int
-    item_end: int
+    first_block: int  # block id at byte offset start
+    item_start: int  # this read covers sorted MAYBE blocks
+    item_end: int  # item_start to item_end - 1
 
 
 def open_skipzfp(
@@ -480,6 +509,7 @@ def ceildiv(a: int, b: int) -> int:
 
 
 def find_codec(arr: zarr.Array) -> Any:
+    """Return the skipzfp codec of arr, matching by name rather than by class."""
     for codec in arr.metadata.codecs:
         if getattr(codec, "codec_name", None) == "skipzfp":
             return codec
@@ -494,6 +524,7 @@ def find_codec(arr: zarr.Array) -> Any:
 
 
 def get_layout(arr: zarr.Array) -> _Layout:
+    """Verify that arr can be queried and return its byte layout."""
     if len(arr.shape) != 3:
         raise ValueError("query_gt requires a 3D array")
 
@@ -567,15 +598,22 @@ def get_layout(arr: zarr.Array) -> _Layout:
 def chunk_coords(
     grid_shape: tuple[int, int, int],
 ) -> list[tuple[int, int, int]]:
+    """Return the coordinates of every chunk, in C order."""
     return list(itertools.product(*(range(n) for n in grid_shape)))
 
 
 def full_key(arr: zarr.Array, chunk_key: str) -> str:
+    """Return the store key of a chunk, including the array's path."""
     prefix = arr.store_path.path.strip("/")
     return f"{prefix}/{chunk_key}" if prefix else chunk_key
 
 
 def batched(items: Iterable[_Range], size: int) -> Iterable[list[_Range]]:
+    """Yield lists of up to size items.
+
+    This is itertools.batched, written out because that needs Python 3.12
+    and the package still supports 3.11.
+    """
     it = iter(items)
 
     while True:
@@ -590,6 +628,11 @@ async def read_one(
     req: _Range,
     sem: asyncio.Semaphore,
 ) -> bytes:
+    """Read one byte range.
+
+    It raises an error if the object is missing or fewer bytes come back
+    than requested.
+    """
     async with sem:
         buf = await store.get(
             req.key,
@@ -616,6 +659,11 @@ async def read_ranges(
     concurrency: int,
     batch_size: int,
 ) -> list[bytes]:
+    """Read byte ranges in batches.
+
+    At most `concurrency` reads run at a time, and the results come back in
+    the same order as reqs.
+    """
     if concurrency <= 0:
         raise ValueError("request_concurrency must be greater than 0")
     if batch_size <= 0:
@@ -632,6 +680,7 @@ async def read_ranges(
 
 
 async def read_meta(arr: zarr.Array, lt: _Layout) -> tuple[np.ndarray, int, int]:
+    """Read the whole zone map, with its size in bytes and number of objects."""
     path = arr.attrs.get(META_ATTR)
     if not path:
         raise ValueError("array has no metadata; run codec.write_meta first")
@@ -653,6 +702,10 @@ async def read_meta(arr: zarr.Array, lt: _Layout) -> tuple[np.ndarray, int, int]
 def unit_to_chunk(
     lt: _Layout, unit_ids: np.ndarray, ranks: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Turn the older planner's (unit, rank) pairs into chunk-order ids.
+
+    It is only used when FUSED_PLAN is False.
+    """
     subs = tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape))
     n_unit = int(np.prod(lt.unit_grid))
     u = np.unravel_index(np.arange(n_unit), lt.unit_grid)
@@ -675,6 +728,11 @@ def unit_to_chunk(
 
 
 def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
+    """Keep only one layer's error bound in each zone-map record.
+
+    The C planner reads records with a single error bound, so the bounds of
+    the other layers are dropped.
+    """
     m = meta.reshape(-1, lt.meta_size)
     n_layer = len(lt.layers)
     eps = m[:, 8 + 4 * layer : 12 + 4 * layer]
@@ -693,6 +751,11 @@ async def stream_count(
     threshold: float,
     concurrency: int,
 ) -> tuple[int, int, float]:
+    """Read each merged range and count x > threshold as soon as it arrives.
+
+    It returns the count, the bytes read and the decode seconds summed over
+    all reads.
+    """
     loop = asyncio.get_running_loop()
     sem = asyncio.Semaphore(concurrency)
 
@@ -723,6 +786,11 @@ def merge_ranges(
     merge_gap_blocks: int,
     base: int = 0,
 ) -> tuple[list[_MergedRange], np.ndarray]:
+    """Turn MAYBE blocks into merged byte-range reads for one layer.
+
+    base is the byte offset of the layer in each chunk. It returns the reads
+    and the block ids sorted in chunk order, which the reads index into.
+    """
     if merge_gap_blocks < 0:
         raise ValueError("merge_gap_blocks must be non-negative")
 
@@ -730,6 +798,7 @@ def merge_ranges(
     if n == 0:
         return [], np.empty(0, dtype=np.uint32)
 
+    # the C planner already returns chunk order, so the sort is usually skipped
     key = (chunk_ids.astype(np.uint64) << np.uint64(32)) | block_ids.astype(np.uint64)
     if np.all(key[1:] > key[:-1]):
         chunks, blocks = chunk_ids, block_ids
@@ -1008,7 +1077,7 @@ def query_gt(
             passed to fsspec when source is a URL.
         threads: C threads for planning, and for decoding when layer > 0,
             where 0 uses all cores.
-        request_concurrency: Maximum number of reads in flight at once.
+        request_concurrency: Maximum number of reads running at a time.
         request_batch_size: Number of reads issued per batch when
             layer > 0, 4 * request_concurrency by default.
         merge_gap_blocks: Merge two reads in the same chunk when at most
