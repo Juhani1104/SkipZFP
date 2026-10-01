@@ -327,6 +327,33 @@ def native() -> _Native:
 
 @dataclass(frozen=True)
 class QueryResult:
+    """Answer of a query, plus where its bytes and time went.
+
+    Every block is exactly one of IN, OUT or MAYBE, so
+    in_blocks + out_blocks + maybe_blocks == total_blocks.
+
+    Attributes:
+        count: Number of matching values.
+        in_blocks: Blocks whose values all match; counted from metadata.
+        out_blocks: Blocks with no matching value; skipped.
+        maybe_blocks: Blocks that were read and decoded.
+        total_blocks: Blocks in the whole array.
+        metadata_bytes_read: Bytes of zone-map metadata read.
+        payload_bytes_read: Bytes of compressed block data read.
+        metadata_requests: Objects read for the metadata.
+        payload_requests: Range reads issued for block data.
+        useful_payload_bytes: Bytes of the MAYBE blocks themselves.
+        payload_overread_bytes: Extra bytes read because nearby reads were
+            merged or a whole chunk prefix was fetched.
+        metadata_read_seconds: Time to read the metadata.
+        planning_seconds: Time to classify blocks as IN, OUT or MAYBE.
+        payload_read_seconds: Time to read block data. With layer 0,
+            decoding overlaps the reads and is included here.
+        decode_seconds: Time spent decoding. With layer 0 it is summed over
+            reads running in parallel, so it can exceed the wall time.
+        total_seconds: Wall time of the whole query.
+    """
+
     count: int
     in_blocks: int
     out_blocks: int
@@ -346,10 +373,12 @@ class QueryResult:
 
     @property
     def bytes_read(self) -> int:
+        """Total bytes read, metadata plus payload."""
         return self.metadata_bytes_read + self.payload_bytes_read
 
     @property
     def range_requests(self) -> int:
+        """Total read requests, metadata plus payload."""
         return self.metadata_requests + self.payload_requests
 
 
@@ -395,6 +424,27 @@ def open_skipzfp(
     array_path: str = "",
     storage_options: Mapping[str, Any] | None = None,
 ) -> zarr.Array:
+    """Open an array for reading, or return it as is if already opened.
+
+    It does not check that the array uses the skipzfp codec; the query
+    functions do that.
+
+    Args:
+        source: An opened zarr.Array, or a local path, URL or store that
+            zarr can open.
+        array_path: Path of the array inside the store.
+        storage_options: Options for a cloud store, such as credentials,
+            passed to fsspec when source is a URL.
+
+    Returns:
+        The array, opened read-only.
+
+    Raises:
+        ValueError: If array_path or storage_options is given together
+            with an opened array.
+        RuntimeError: If source is a URL and its fsspec backend is missing.
+        TypeError: If source opens to something other than an array.
+    """
     if isinstance(source, zarr.Array):
         if array_path:
             raise ValueError("array_path cannot be used with an opened zarr.Array")
@@ -718,6 +768,14 @@ async def query_gt_async(
     layer: int | None = None,
     max_chunk_requests: int = 1,
 ) -> QueryResult:
+    """Async version of query_gt for an already opened array.
+
+    Takes the same keyword arguments as query_gt except array_path and
+    storage_options. Use it to run several queries concurrently.
+
+    Raises:
+        TypeError: If arr is not an opened zarr.Array.
+    """
     if not isinstance(arr, zarr.Array):
         raise TypeError("query_gt_async expects an opened zarr.Array")
 
@@ -740,10 +798,15 @@ async def query_gt_async(
     keys = [full_key(arr, arr.metadata.encode_chunk_key(coord)) for coord in coords]
     store = arr.store_path.store
 
+    # 1. read the zone map: per-unit value range and error bounds, plus
+    # per-block offsets
     t1 = time.perf_counter()
     meta, meta_bytes, meta_requests = await read_meta(arr, lt)
     meta_read_sec = time.perf_counter() - t1
 
+    # 2. plan: classify every block as IN, OUT or MAYBE. plan_meta keeps only
+    # the chosen layer's error bound, so the C planner sees a single-layer
+    # record that is 4 bytes per extra layer shorter.
     t1 = time.perf_counter()
     if FUSED_PLAN:
         chunk_ids, block_ids, n_in, n_out = await asyncio.to_thread(
@@ -769,6 +832,9 @@ async def query_gt_async(
         chunk_ids, block_ids = unit_to_chunk(lt, unit_ids, ranks)
     plan_sec = time.perf_counter() - t1
 
+    # 3. turn MAYBE blocks into byte-range reads. Each layer is stored as its
+    # own contiguous section of the chunk, so every layer up to `layer` needs
+    # its own set of reads.
     per_layer = [
         merge_ranges(
             keys,
@@ -784,6 +850,8 @@ async def query_gt_async(
     sorted_chunks = chunk_ids[np.lexsort((block_ids, chunk_ids))] if layer > 0 else None
     cols = np.cumsum((0, *lt.layer_bytes[: layer + 1]))
 
+    # A chunk that would need many small reads is usually cheaper to fetch as
+    # one read of its whole layer prefix, since per-request latency dominates.
     dense: set[str] = set()
     if layer > 0:
         per_key = collections.Counter(
@@ -792,7 +860,13 @@ async def query_gt_async(
         dense = {k for k, n in per_key.items() if n > max_chunk_requests}
     prefix_end = int(cols[-1]) * lt.blocks_per_chunk
 
+    # 4. read and decode the MAYBE blocks.
     if layer == 0:
+        # Layer 0 alone is a complete low-rate encoding of each block, so each
+        # read is decoded as soon as it arrives, overlapping with the reads
+        # still in flight. Hence
+        # payload_read_sec includes decoding, and decode_sec sums the decode
+        # time of every read.
         merged0, sorted0 = per_layer[0]
         t1 = time.perf_counter()
         n_maybe_val, payload_bytes, decode_sec = await stream_count(
@@ -808,6 +882,9 @@ async def query_gt_async(
         payload_read_sec = time.perf_counter() - t1
         n_payload_reqs = len(merged0)
     else:
+        # A block's bits are split across layers, so all reads must finish
+        # before any block can be decoded. Read everything, assemble one row
+        # per block, then decode in a single multithreaded C call.
         payload_reqs = []
         fills = []
         for j, (merged, _) in enumerate(per_layer):
@@ -831,6 +908,8 @@ async def query_gt_async(
         )
         payload_read_sec = time.perf_counter() - t1
 
+        # row i = block i's layer-0 bytes, then layer-1 bytes, ... which is a
+        # valid ZFP stream at the combined rate
         out = np.empty((len(sorted_blocks), int(cols[-1])), dtype=np.uint8)
         for data, (j, item) in zip(payload_parts, fills):
             buf = np.frombuffer(data, dtype=np.uint8)
@@ -872,6 +951,7 @@ async def query_gt_async(
         n_payload_reqs = len(payload_reqs)
 
     total_blocks = len(keys) * lt.blocks_per_chunk
+    # every value of an IN block matches, so IN blocks are counted unread
     total_count = n_in * lt.values_per_block + n_maybe_val
     useful_bytes = len(sorted_blocks) * block_size
 
@@ -908,6 +988,48 @@ def query_gt(
     layer: int | None = None,
     max_chunk_requests: int = 1,
 ) -> QueryResult:
+    """Count values greater than threshold in a SkipZFP array.
+
+    Blocks whose zone-map range lies entirely above or below the threshold
+    are counted or skipped from metadata alone; only the remaining blocks
+    are downloaded and decoded. The count is exact for the decoded values,
+    which can differ from the original data by the ZFP error.
+
+    Args:
+        source: An opened zarr.Array, or a local path or URL to open.
+        threshold: Count values strictly greater than this.
+        array_path: Path of the array inside the store, when source is
+            not an opened array.
+        storage_options: Options for a cloud store, such as credentials,
+            passed to fsspec when source is a URL.
+        threads: C threads for planning, and for decoding when layer > 0;
+            0 uses all cores.
+        request_concurrency: Maximum number of reads in flight at once.
+        request_batch_size: When layer > 0, number of reads issued per
+            batch; defaults to 4 * request_concurrency.
+        merge_gap_blocks: Merge two reads in the same chunk when at most
+            this many unneeded blocks lie between them. Larger values mean
+            fewer requests but more bytes read.
+        layer: Precision layer to read, 0 being the lowest rate; None reads
+            the full rate. Only matters for arrays written with layers.
+        max_chunk_requests: When layer > 0, a chunk that would need more
+            than this many reads is fetched in a single read instead.
+
+    Returns:
+        QueryResult with the count, the number of IN, OUT and MAYBE blocks,
+        and the bytes, requests and seconds spent in each stage.
+
+    Raises:
+        ValueError: If the array's shape or chunking is not supported, it
+            does not use the skipzfp codec, it has no zone-map metadata
+            (see write_meta), or an argument is out of range.
+        RuntimeError: If source is a URL and its fsspec backend is missing.
+        FileNotFoundError: If a chunk the query needs is missing.
+
+    Example:
+        >>> r = query_gt("data/t2m.zarr", 295.0)
+        >>> print(r.count, r.bytes_read)
+    """
     arr = open_skipzfp(
         source,
         array_path=array_path,
