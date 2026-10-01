@@ -1,3 +1,5 @@
+"""The package exposes the public API, the codec entry point and the C library."""
+
 from importlib.metadata import entry_points
 
 import pytest

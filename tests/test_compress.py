@@ -1,3 +1,5 @@
+"""Compression through the C library, checked against zfpy and block by block."""
+
 import numpy as np
 import pytest
 import zfpy
@@ -9,6 +11,7 @@ from helpers import RATES, SHAPE, decode_one_block, smooth_field, split, true_bl
 
 @pytest.mark.parametrize("rate", RATES)
 def test_payload_matches_official_zfpy(rate):
+    """The payload is byte for byte the same as zfpy's output at the same rate."""
     a = smooth_field()
     payload, *_ = split(a, rate)
     ref = np.frombuffer(zfpy.compress_numpy(a, rate=rate, write_header=False), np.uint8)
@@ -16,6 +19,11 @@ def test_payload_matches_official_zfpy(rate):
 
 
 def test_block_zero_is_contiguous_4x4x4():
+    """Block 0 of the payload holds exactly the first 4x4x4 corner of the chunk.
+
+    Each value encodes its own (i, j, k), and rate 32 keeps them accurate enough
+    to read back, which shows that blocks are cut and numbered in C order.
+    """
     i, j, k = np.indices(SHAPE)
     coded = (i * 10000 + j * 100 + k).astype(np.float32)
     buf = codec.native().encode(coded, 32.0, 4)
@@ -34,6 +42,11 @@ def test_single_block_decode_is_bit_exact(rate):
 
 
 def test_constant_chunk():
+    """A chunk with a single value round-trips with all block offsets at zero.
+
+    Its min equals its max, a case the zone map handles separately because the
+    offsets are scaled by max - min.
+    """
     a = np.full(SHAPE, 3.5, np.float32)
     buf, cmin, cmax, eps, offs = split(a, 8.0)
     assert cmin == cmax == 3.5 and not offs.any()

@@ -31,6 +31,8 @@ _ERR = {
 
 
 class _Native:
+    """ctypes bindings for the codec functions in csrc/core.c."""
+
     def __init__(self) -> None:
         self.lib = load_library()
 
@@ -95,6 +97,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> tuple[int, int]:
+        """Return the byte sizes of a chunk's payload and of its zone map record."""
         data_size = ctypes.c_size_t()
         meta_size = ctypes.c_size_t()
 
@@ -116,6 +119,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> np.ndarray:
+        """Compress arr with fixed-rate ZFP, with blocks in C order."""
         src = np.ascontiguousarray(arr, dtype=np.float32)
         shape = tuple(int(x) for x in src.shape)
 
@@ -154,6 +158,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> np.ndarray:
+        """Decompress fixed-rate ZFP bytes into a float32 array of shape."""
         src = np.ascontiguousarray(buf, dtype=np.uint8).reshape(-1)
         out = np.empty(shape, dtype=np.float32)
 
@@ -178,6 +183,7 @@ class _Native:
         rate: float,
         block_dim: int,
     ) -> np.ndarray:
+        """Compute the zone map record of arr at one rate, with one error bound."""
         src = np.ascontiguousarray(arr, dtype=np.float32)
         shape = tuple(int(x) for x in src.shape)
         _, meta_size = self.layout(shape, rate, block_dim)
@@ -212,6 +218,42 @@ def native() -> _Native:
 
 @dataclass(frozen=True)
 class SkipZFPCodec(ArrayBytesCodec):
+    """Zarr v3 codec that stores float32 chunks with fixed-rate ZFP.
+
+    Every 4x4x4 block compresses to the same number of bytes, so any block
+    can be fetched with a byte-range read. After writing the array, call
+    :func:`write_meta` to build the zone map, which lets queries skip
+    blocks.
+
+    Attributes:
+        rate: Bits per value, so a block takes 64 * rate / 8 bytes, and a
+            higher rate gives a smaller error but a larger file.
+        block_dim: Edge length of a ZFP block, which must be 4.
+        layers: Increasing rates ending at rate, such as (2, 4, 8), or
+            empty for a single layer. Each block is split into these
+            prefixes and stored layer by layer, so a query can read only a
+            lower-rate prefix.
+        block_order: Order in which blocks are laid out in a unit, given as
+            axis numbers from slowest to fastest changing, where the default
+            (0, 1, 2) is plain C order. For axes (time, y, x), (1, 2, 0)
+            makes time change fastest, so the blocks of one (y, x) column
+            sit next to each other and a point's time series takes one read.
+        sub_chunk: Shape of the units a chunk is split into, or empty to
+            keep the whole chunk as one unit. Each unit is encoded on its
+            own with its own entry in the zone map, which keeps chunks large
+            (fewer objects) while the zone map stays fine-grained.
+
+    Example:
+        >>> group = zarr.open_group("demo.zarr", mode="w")
+        >>> data = ...  # float32 numpy array with axes (time, y, x)
+        >>> codec = SkipZFPCodec(rate=8, sub_chunk=(64, 16, 32))
+        >>> z = group.create_array("t2m", shape=data.shape,
+        ...     chunks=(64, 128, 256), dtype="float32",
+        ...     serializer=codec, compressors=None)
+        >>> z[:] = data
+        >>> write_meta(z, data)
+    """
+
     codec_name: ClassVar[str] = "skipzfp"
     is_fixed_size: ClassVar[bool] = True
 
@@ -247,14 +289,21 @@ class SkipZFPCodec(ArrayBytesCodec):
         object.__setattr__(self, "sub_chunk", sub_chunk)
 
     def unit(self, shape: tuple[int, ...]) -> tuple[int, ...]:
+        """Return the shape of one unit in a chunk of the given shape."""
         return self.sub_chunk or tuple(shape)
 
     @property
     def layer_bytes(self) -> tuple[int, ...]:
+        """Bytes each layer adds to a block, e.g. (16, 16, 32) for (2, 4, 8)."""
         prev = (0.0, *self.layers[:-1])
         return tuple(int(8 * (r - p)) for r, p in zip(self.layers, prev))
 
     def plain(self, shape: tuple[int, ...]) -> bool:
+        """Return whether a chunk can be encoded in a single C call.
+
+        This holds when the chunk is one unit with one layer in C order, so
+        none of the unit, layer or block-order handling is needed.
+        """
         return (
             len(self.layers) == 1
             and self.block_order == (0, 1, 2)
@@ -379,6 +428,12 @@ class SkipZFPCodec(ArrayBytesCodec):
         return chunk_spec.prototype.nd_buffer.from_ndarray_like(out)
 
     def pack(self, arr: np.ndarray) -> np.ndarray:
+        """Encode a chunk into the bytes that are stored.
+
+        Each unit is encoded on its own and its blocks are reordered by
+        block_order. The bytes are then grouped by layer, with the layer-0
+        part of every block first, then the layer-1 part, and so on.
+        """
         shape = tuple(arr.shape)
         if self.plain(shape):
             return native().encode(arr, self.rate, self.block_dim)
@@ -402,6 +457,7 @@ class SkipZFPCodec(ArrayBytesCodec):
         )
 
     def unpack(self, buf: np.ndarray, shape: tuple[int, int, int]) -> np.ndarray:
+        """Decode stored bytes back into a chunk, the inverse of :meth:`pack`."""
         if self.plain(shape):
             return native().decode(buf, shape, self.rate, self.block_dim)
 
@@ -427,6 +483,7 @@ class SkipZFPCodec(ArrayBytesCodec):
 def unit_slices(
     shape: tuple[int, ...], unit: tuple[int, ...]
 ) -> list[tuple[slice, ...]]:
+    """Return slices that cut an array of the given shape into units."""
     grid = tuple(s // u for s, u in zip(shape, unit))
     return [
         tuple(slice(i * u, (i + 1) * u) for i, u in zip(idx, unit))
@@ -437,6 +494,10 @@ def unit_slices(
 def block_rank(
     shape: tuple[int, ...], order: tuple[int, ...], block_dim: int = 4
 ) -> np.ndarray:
+    """Return the storage position of each block in a unit.
+
+    Entry i is where block_order puts the block with C-order index i.
+    """
     blocks = tuple(s // block_dim for s in shape)
     coords = np.indices(blocks).reshape(len(blocks), -1)
     return np.ravel_multi_index(
@@ -445,6 +506,11 @@ def block_rank(
 
 
 def meta_size(codec: SkipZFPCodec, chunk: tuple[int, ...]) -> int:
+    """Return the size in bytes of one unit's record in the zone map.
+
+    A record holds the unit's min and max as two float32, one float32 error
+    bound per layer, and each block's quantized min and max as two uint8.
+    """
     n = int(np.prod([s // codec.block_dim for s in chunk]))
     return 8 + 4 * len(codec.layers) + 2 * n
 
@@ -453,6 +519,7 @@ META_ATTR = "skipzfp_meta"
 
 
 def find_codec(arr: zarr.Array) -> SkipZFPCodec:
+    """Return the SkipZFPCodec of arr, or raise ValueError if it has none."""
     for c in arr.metadata.codecs:
         if isinstance(c, SkipZFPCodec):
             return c
@@ -468,6 +535,32 @@ def write_meta(
     t_chunk: int = 16,
     threads: int = 32,
 ) -> zarr.Array:
+    """Build the zone map that queries use to skip blocks.
+
+    This function runs once after the array is written, storing the value
+    range and the largest ZFP error at each layer for every unit, and the
+    min and max of every block rounded outward to 8 bits. The bounds come
+    from the original data, and a query widens them by the stored error so
+    they also hold for the decoded values.
+
+    The zone map is saved as a uint8 array next to arr, replacing any
+    existing one at the same path, and arr's attributes point to it.
+
+    Args:
+        arr: An array written with SkipZFPCodec, inside a group.
+        data: The original values written to arr.
+        path: Where to save the zone map. Defaults to "<arr.path>_meta".
+        t_chunk: Units along the first axis in each chunk of the zone map.
+        threads: Threads used to compute the zone map.
+
+    Returns:
+        The zone map, as a zarr array.
+
+    Raises:
+        ValueError: If arr does not use SkipZFPCodec, data does not match
+            its shape, the shape is not whole chunks, or arr is not inside
+            a group.
+    """
     codec = find_codec(arr)
     chunk = tuple(int(x) for x in arr.metadata.chunk_grid.chunk_shape)
     grid = tuple(s // c for s, c in zip(arr.shape, chunk))
@@ -497,6 +590,9 @@ def write_meta(
         overwrite=True,
     )
 
+    # One record per unit: min and max, each layer's error bound, then the
+    # per-block offsets in storage order. Min, max and offsets depend only on
+    # the data, so taking them from the last layer's result is enough.
     def one(idx: tuple[int, ...]) -> np.ndarray:
         sl = tuple(slice(i * u, (i + 1) * u) for i, u in zip(idx, unit))
         per = [native().meta(data[sl], r, codec.block_dim) for r in codec.layers]

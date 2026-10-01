@@ -7,6 +7,7 @@ from pathlib import Path
 
 @cache
 def load_library() -> ctypes.CDLL:
+    """Load the compiled C library _core.so, once per process."""
     path = Path(__file__).with_name("_core.so")
     if not path.exists():
         raise FileNotFoundError(

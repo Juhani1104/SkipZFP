@@ -1,3 +1,5 @@
+"""The C functions called directly through ctypes, including bad and edge-case input."""
+
 import ctypes
 
 import numpy as np
@@ -397,6 +399,7 @@ def test_decode_block_any_dimension(lib, dims):
 
 
 def test_threads_zero_uses_all_cores(lib, encoded):
+    """Passing threads=0, which uses all cores, still decodes and counts correctly."""
     _, buf, full = encoded
     n = len(full)
     out = np.empty((n, 64), np.float32)

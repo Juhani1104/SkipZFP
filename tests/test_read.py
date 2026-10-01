@@ -1,3 +1,5 @@
+"""Every layout reads back the same values, in full or in part."""
+
 import numpy as np
 import pytest
 import zarr

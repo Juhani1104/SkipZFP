@@ -1,3 +1,5 @@
+"""query_gt counts exactly, accounts for what it reads, and reports bad input."""
+
 import numpy as np
 import pytest
 import zarr
@@ -38,6 +40,11 @@ def test_query_gt_count_is_exact_on_reconstruction(stored, q):
 
 @pytest.mark.parametrize("q", (0.1, 0.5, 0.9))
 def test_in_out_guarantees_hold_for_original_and_reconstruction(stored, q):
+    """IN and OUT blocks are right for both the original and the decoded values.
+
+    Every value of an IN block must exceed the threshold and every value of an OUT
+    block must not, which is what lets a query count or skip them without reading.
+    """
     a, z, rate = stored
     rec = z[:]
     th = np.float32(np.quantile(a, q))
@@ -59,6 +66,11 @@ def test_in_out_guarantees_hold_for_original_and_reconstruction(stored, q):
 
 
 def test_threshold_compared_in_double(stored):
+    """A threshold between two float32 values is compared in double.
+
+    The threshold lies just below a stored value but rounds to it in float32, so
+    casting it to float32 would drop the values equal to it from the count.
+    """
     a, z, _ = stored
     rec = z[:]
     v = np.float32(np.median(rec))
@@ -92,6 +104,11 @@ def test_threshold_above_max_reads_no_payload(one):
 
 @pytest.mark.parametrize("gap", (0, 64, 10**6))
 def test_accounting_is_consistent(one, gap):
+    """The byte and request counts in QueryResult add up.
+
+    Each total equals the sum of its parts, and with no merge gap nothing is read
+    beyond the MAYBE blocks.
+    """
     z, rec = one
     res = query.query_gt(z, float(np.median(rec)), merge_gap_blocks=gap)
     assert res.bytes_read == res.metadata_bytes_read + res.payload_bytes_read
