@@ -102,3 +102,7 @@ def test_plan_chunks_rejects_bad_geometry():
         query.native().plan_chunks(meta, 12 + 2 * 8, (2, 1, 1), (3, 1, 1), 8, 0.0, 1)
     with pytest.raises(RuntimeError):
         query.native().plan_chunks(meta, 12 + 2 * 7, (1, 1, 1), (1, 1, 1), 8, 0.0, 1)
+    with pytest.raises(RuntimeError):
+        query.native().plan_chunks(
+            meta, 12 + 2 * 8, (2, 1, 1), (3, 1, 1), 8, 0.0, 1, 1.0
+        )

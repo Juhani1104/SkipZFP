@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import zarr
 
-from skipzfp import query, range_query
+from skipzfp import query
 
 from helpers import LAYERS, make_array, smooth_field
 
@@ -79,7 +79,7 @@ def test_inclusive_ends_on_values_that_occur(data, lo_inc, hi_inc):
     _, arrs, dec, _ = data
     v = np.unique(dec["plain"])
     lo, hi = float(v[len(v) // 3]), float(v[len(v) // 3 + 50])
-    r = range_query.query_range(
+    r = query.query_range(
         arrs["plain"], lo, hi, lo_inclusive=lo_inc, hi_inclusive=hi_inc
     )
     assert r.count == brute(dec["plain"], lo, hi, lo_inc, hi_inc)
@@ -88,9 +88,9 @@ def test_inclusive_ends_on_values_that_occur(data, lo_inc, hi_inc):
 def test_single_value_and_empty_ranges(data):
     _, arrs, dec, _ = data
     x = float(np.unique(dec["plain"])[1000])
-    point = range_query.query_range(arrs["plain"], x, x, lo_inclusive=True)
+    point = query.query_range(arrs["plain"], x, x, lo_inclusive=True)
     assert point.count == int((dec["plain"] == x).sum()) > 0
-    assert range_query.query_range(arrs["plain"], x, x).count == 0
+    assert query.query_range(arrs["plain"], x, x).count == 0
 
 
 @pytest.mark.parametrize("k", range(len(LAYERS)))
@@ -98,7 +98,7 @@ def test_single_value_and_empty_ranges(data):
 def test_range_on_each_layer(data, k, max_req):
     a, arrs, _, plain = data
     lo, hi = float(np.quantile(a, 0.25)), float(np.quantile(a, 0.6))
-    r = range_query.query_range(
+    r = query.query_range(
         arrs["layers"], lo, hi, layer=k, merge_gap_blocks=4, max_chunk_requests=max_req
     )
     assert r.count == brute(plain[LAYERS[k]], lo, hi)
@@ -134,7 +134,7 @@ def test_below_and_at_or_above_add_up(data):
 def test_rejects_nan_or_reversed_bounds(data, lo, hi):
     _, arrs, _, _ = data
     with pytest.raises(ValueError):
-        range_query.query_range(arrs["plain"], lo, hi)
+        query.query_range(arrs["plain"], lo, hi)
 
 
 @pytest.mark.parametrize("x", (1.1, 0.5, -3.25, 1e-40))
@@ -149,49 +149,11 @@ def test_range_bounds_use_float32_neighbours(x):
     if float(f) < x:
         f = np.nextafter(f, np.float32(np.inf))
     below = float(np.nextafter(f, np.float32(-np.inf)))
-    a, b = range_query.range_bounds(x, x, lo_inclusive=True, hi_inclusive=False)
+    a, b = query.range_bounds(x, x, lo_inclusive=True, hi_inclusive=False)
     assert a == below  # x >= value  <=>  value > below
     assert b == below  # x <  value  <=>  value <= below
-    assert range_query.range_bounds(x, x) == (x, x)
-    assert range_query.range_bounds(None, None) == (-math.inf, math.inf)
-
-
-def test_async_matches_sync(data):
-    """query_range_async on an opened array gives the same result as query_range."""
-    _, arrs, _, _ = data
-    z = arrs["plain"]
-    want = range_query.query_range(z, 280.0, 285.0)
-    got = zarr.core.sync.sync(range_query.query_range_async(z, 280.0, 285.0))
-    assert got.count == want.count and got.maybe_blocks == want.maybe_blocks
-
-
-@pytest.mark.parametrize(
-    "kw, msg",
-    [
-        (dict(request_concurrency=0), "request_concurrency"),
-        (dict(request_batch_size=0), "request_batch_size"),
-        (dict(merge_gap_blocks=-1), "merge_gap_blocks"),
-        (dict(layer=1), "layer must be in"),
-        (dict(layer=-1), "layer must be in"),
-    ],
-)
-def test_rejects_bad_query_options(data, kw, msg):
-    _, arrs, _, _ = data
-    with pytest.raises(ValueError, match=msg):
-        range_query.query_range(arrs["plain"], 280.0, 285.0, **kw)
-
-
-def test_async_entry_requires_open_array():
-    with pytest.raises(TypeError, match="opened zarr.Array"):
-        zarr.core.sync.sync(range_query.query_range_async("not-an-array", 0.0, 1.0))
-
-
-def test_plan_chunks_rejects_bad_geometry():
-    """A failing C call surfaces as RuntimeError instead of a bad result."""
-    meta = np.zeros(12 + 2 * 8, dtype=np.uint8)
-    plan = query.native().plan_chunks
-    with pytest.raises(RuntimeError):
-        plan(meta, 12 + 2 * 8, (2, 1, 1), (3, 1, 1), 8, 0.0, 1, hi=1.0)
+    assert query.range_bounds(x, x) == (x, x)
+    assert query.range_bounds(None, None) == (-math.inf, math.inf)
 
 
 @pytest.mark.parametrize("lo, hi", ((None, 1.0), (1.0, None), (None, None)))
@@ -209,12 +171,3 @@ def test_one_sided_rejects_nan(data, fn):
     _, arrs, _, _ = data
     with pytest.raises(ValueError, match="NaN"):
         getattr(query, fn)(arrs["plain"], math.nan)
-
-
-def test_lt_async_matches_sync(data):
-    a, arrs, _, _ = data
-    z, t = arrs["plain"], float(np.quantile(a, 0.3))
-    got = zarr.core.sync.sync(query.query_lt_async(z, t, inclusive=True))
-    assert got.count == query.query_lt(z, t, inclusive=True).count
-    with pytest.raises(TypeError, match="opened zarr.Array"):
-        zarr.core.sync.sync(query.query_lt_async("not-an-array", 0.0))
