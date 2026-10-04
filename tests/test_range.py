@@ -174,6 +174,6 @@ def test_async_entry_requires_open_array():
 def test_plan_chunks_rejects_bad_geometry():
     """A failing C call surfaces as RuntimeError instead of a bad result."""
     meta = np.zeros(12 + 2 * 8, dtype=np.uint8)
-    plan = range_query.range_native().plan_chunks
+    plan = query.native().plan_chunks
     with pytest.raises(RuntimeError):
-        plan(meta, 12 + 2 * 8, (2, 1, 1), (3, 1, 1), 8, 0.0, 1.0, 1)
+        plan(meta, 12 + 2 * 8, (2, 1, 1), (3, 1, 1), 8, 0.0, 1, hi=1.0)
