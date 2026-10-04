@@ -40,7 +40,25 @@ static int mul_size(size_t a, size_t b, size_t* out) {
 /* the value predicate of a range query: lo < v <= hi */
 static inline int in_range(float v, double lo, double hi) {
     double d = (double)v;
-    return d > lo && d <= hi;
+    return (d > lo) & (d <= hi); /* & rather than && keeps the loop branch-free */
+}
+
+/* count values with lo < v <= hi; an open upper end takes the same single
+ * comparison as the x > T path, so it costs the same */
+static size_t count_in_range(const float* v, size_t n, double lo, double hi) {
+    size_t c = 0;
+
+    if (hi == INFINITY) {
+        for (size_t i = 0; i < n; i++) {
+            c += (double)v[i] > lo;
+        }
+    } else {
+        for (size_t i = 0; i < n; i++) {
+            c += in_range(v[i], lo, hi);
+        }
+    }
+
+    return c;
 }
 
 static int block_layout(int block_dim, double rate, size_t* nval, size_t* nbytes) {
@@ -407,11 +425,7 @@ int szfp_count_range_blocks(
             continue;
         }
 
-        local_count = 0;
-
-        for (size_t i = 0; i < nval; i++) {
-            local_count += in_range(vals[i], lo, hi);
-        }
+        local_count = count_in_range(vals, nval, lo, hi);
 
         count += local_count;
     }
@@ -479,9 +493,7 @@ int szfp_count_offsets_range(
         for (size_t i = 0; i < n; i++) {
             szfp_fast_decode(buf + offsets[i], block_nbytes, vals);
 
-            for (size_t k = 0; k < nval; k++) {
-                count += in_range(vals[k], lo, hi);
-            }
+            count += count_in_range(vals, nval, lo, hi);
         }
     } else {
         bitstream* stream = stream_open((void*)buf, buf_size);
@@ -503,9 +515,7 @@ int szfp_count_offsets_range(
             stream_rseek(stream, (bitstream_offset)offsets[i] * CHAR_BIT);
             zfp_decode_block_float_3(zfp, vals);
 
-            for (size_t k = 0; k < nval; k++) {
-                count += in_range(vals[k], lo, hi);
-            }
+            count += count_in_range(vals, nval, lo, hi);
         }
 
         zfp_stream_close(zfp);
