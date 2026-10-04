@@ -563,7 +563,6 @@ def write_meta(
     """
     codec = find_codec(arr)
     chunk = tuple(int(x) for x in arr.metadata.chunk_grid.chunk_shape)
-    grid = tuple(s // c for s, c in zip(arr.shape, chunk))
 
     if data.shape != arr.shape or any(s % c for s, c in zip(arr.shape, chunk)):
         raise ValueError("data must match the array shape and divide into whole chunks")
