@@ -2,6 +2,7 @@
 
 #include "fastdec.h"
 #include "query.h"
+#include "util.h"
 
 #include <float.h>
 #include <limits.h>
@@ -23,19 +24,6 @@ enum {
     SZFP_ERR_MALLOC = 4,
     SZFP_ERR_ZFP = 5
 };
-
-static int mul_size(size_t a, size_t b, size_t* out) {
-    if (out == NULL) {
-        return 0;
-    }
-
-    if (a != 0 && b > SIZE_MAX / a) {
-        return 0;
-    }
-
-    *out = a * b;
-    return 1;
-}
 
 /* the value predicate of a range query: lo < v <= hi */
 static inline int in_range(float v, double lo, double hi) {
