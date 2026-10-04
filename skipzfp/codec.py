@@ -519,9 +519,13 @@ META_ATTR = "skipzfp_meta"
 
 
 def find_codec(arr: zarr.Array) -> SkipZFPCodec:
-    """Return the SkipZFPCodec of arr, or raise ValueError if it has none."""
+    """Return the SkipZFPCodec of arr, or raise ValueError if it has none.
+
+    It matches by codec name rather than by class, so it still works when the
+    codec class was loaded under another import path.
+    """
     for c in arr.metadata.codecs:
-        if isinstance(c, SkipZFPCodec):
+        if getattr(c, "codec_name", None) == SkipZFPCodec.codec_name:
             return c
 
     raise ValueError("array does not use the skipzfp codec")

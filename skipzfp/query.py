@@ -21,7 +21,8 @@ from zarr.core.buffer import default_buffer_prototype
 from zarr.core.sync import sync
 
 from ._native import load_library
-from .codec import META_ATTR, meta_size
+from .codec import META_ATTR, find_codec, meta_size
+from .codec import native as codec_native
 
 
 class _Native:
@@ -29,17 +30,6 @@ class _Native:
 
     def __init__(self) -> None:
         self.lib = load_library()
-
-        self.lib.szfp_layout.argtypes = [
-            ctypes.c_size_t,
-            ctypes.c_size_t,
-            ctypes.c_size_t,
-            ctypes.c_double,
-            ctypes.c_int,
-            ctypes.POINTER(ctypes.c_size_t),
-            ctypes.POINTER(ctypes.c_size_t),
-        ]
-        self.lib.szfp_layout.restype = ctypes.c_int
 
         self.lib.szfp_plan_range_chunks.argtypes = [
             ctypes.POINTER(ctypes.c_ubyte),
@@ -100,29 +90,6 @@ class _Native:
     def check(code: int, name: str) -> None:
         if code != 0:
             raise RuntimeError(f"{name} failed: {code}")
-
-    def layout(
-        self,
-        shape: tuple[int, int, int],
-        rate: float,
-        block_dim: int,
-    ) -> tuple[int, int]:
-        """Return the byte sizes of a chunk's payload and of its zone map record."""
-        data_size = ctypes.c_size_t()
-        meta_size = ctypes.c_size_t()
-
-        code = self.lib.szfp_layout(
-            shape[0],
-            shape[1],
-            shape[2],
-            rate,
-            block_dim,
-            ctypes.byref(data_size),
-            ctypes.byref(meta_size),
-        )
-        self.check(code, "szfp_layout")
-
-        return int(data_size.value), int(meta_size.value)
 
     def plan_chunks(
         self,
@@ -454,21 +421,6 @@ def ceildiv(a: int, b: int) -> int:
     return (a + b - 1) // b
 
 
-def find_codec(arr: zarr.Array) -> Any:
-    """Return the skipzfp codec of arr, matching by name rather than by class."""
-    for codec in arr.metadata.codecs:
-        if getattr(codec, "codec_name", None) == "skipzfp":
-            return codec
-
-        to_dict = getattr(codec, "to_dict", None)
-        if callable(to_dict):
-            data = to_dict()
-            if isinstance(data, dict) and data.get("name") == "skipzfp":
-                return codec
-
-    raise ValueError("array does not use the skipzfp codec")
-
-
 def get_layout(arr: zarr.Array) -> _Layout:
     """Verify that arr can be queried and return its byte layout."""
     if len(arr.shape) != 3:
@@ -502,7 +454,7 @@ def get_layout(arr: zarr.Array) -> _Layout:
     blocks_per_chunk = int(np.prod(blocks_axis))
     values_per_block = block_dim**3
 
-    data_size, _ = native().layout(
+    data_size, _ = codec_native().layout(
         chunk_shape,
         rate,
         block_dim,
