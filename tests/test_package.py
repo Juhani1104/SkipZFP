@@ -20,7 +20,7 @@ def test_codec_entry_point():
 
 def test_native_library_exports():
     lib = _native.load_library()
-    for sym in ("szfp_layout", "szfp_plan_gt", "szfp_decode_block"):
+    for sym in ("szfp_layout", "szfp_plan_gt_chunks", "szfp_decode_block"):
         assert hasattr(lib, sym)
 
 

@@ -5,91 +5,7 @@
 #include <stdint.h>
 
 #include "core.h"
-
-static int mul_size(size_t a, size_t b, size_t* out) {
-    if (out == NULL) {
-        return 0;
-    }
-
-    if (a != 0 && b > SIZE_MAX / a) {
-        return 0;
-    }
-
-    *out = a * b;
-    return 1;
-}
-
-static int add_size(size_t a, size_t b, size_t* out) {
-    if (out == NULL) {
-        return 0;
-    }
-
-    if (a > SIZE_MAX - b) {
-        return 0;
-    }
-
-    *out = a + b;
-    return 1;
-}
-
-static int calc_size(
-    size_t nx,
-    size_t ny,
-    size_t nz,
-    double rate,
-    int block_dim,
-    size_t* data_size,
-    size_t* meta_size
-) {
-    size_t nxy;
-    size_t nval;
-    size_t bx;
-    size_t by;
-    size_t bz;
-    size_t bxy;
-    size_t nblk;
-    size_t off_size;
-    size_t hdr_size;
-
-    if (data_size == NULL || meta_size == NULL) {
-        return 0;
-    }
-
-    if (nx == 0 || ny == 0 || nz == 0 || rate <= 0.0 || !isfinite(rate)) {
-        return 0;
-    }
-
-    if (block_dim <= 0) {
-        return 0;
-    }
-
-    if (nx % (size_t)block_dim != 0 || ny % (size_t)block_dim != 0 ||
-        nz % (size_t)block_dim != 0) {
-        return 0;
-    }
-
-    if (!mul_size(nx, ny, &nxy) || !mul_size(nxy, nz, &nval)) {
-        return 0;
-    }
-
-    bx = nx / (size_t)block_dim;
-    by = ny / (size_t)block_dim;
-    bz = nz / (size_t)block_dim;
-
-    if (!mul_size(bx, by, &bxy) || !mul_size(bxy, bz, &nblk) ||
-        !mul_size(nblk, 2u, &off_size)) {
-        return 0;
-    }
-
-    *data_size = (size_t)((double)nval * rate / 8.0);
-    hdr_size = 3u * sizeof(float);
-
-    if (*data_size == 0 || !add_size(hdr_size, off_size, meta_size)) {
-        return 0;
-    }
-
-    return 1;
-}
+#include "util.h"
 
 SzResult szfp_decode(
     const unsigned char* src,
@@ -105,7 +21,7 @@ SzResult szfp_decode(
     size_t nxy;
     size_t nval;
     size_t data_size;
-    size_t meta_size;
+    SzfpLayout lt;
     bitstream* stream;
     zfp_stream* zfp;
     zfp_field* field;
@@ -123,9 +39,10 @@ SzResult szfp_decode(
         return SZ_ERR_SIZE;
     }
 
-    if (!calc_size(nx, ny, nz, rate, block_dim, &data_size, &meta_size)) {
+    if (!szfp_calc_layout(nx, ny, nz, rate, block_dim, &lt)) {
         return SZ_ERR_ARG;
     }
+    data_size = lt.data_size;
 
     if (src_size != data_size) {
         return SZ_ERR_SIZE;
@@ -170,13 +87,18 @@ SzResult szfp_layout(
     size_t* data_size,
     size_t* meta_size
 ) {
+    SzfpLayout lt;
+
     if (data_size == NULL || meta_size == NULL) {
         return SZ_ERR_NULL;
     }
 
-    if (!calc_size(nx, ny, nz, rate, block_dim, data_size, meta_size)) {
+    if (!szfp_calc_layout(nx, ny, nz, rate, block_dim, &lt)) {
         return SZ_ERR_ARG;
     }
+
+    *data_size = lt.data_size;
+    *meta_size = lt.meta_size;
 
     return SZ_OK;
 }

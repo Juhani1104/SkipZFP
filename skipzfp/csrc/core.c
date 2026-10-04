@@ -10,97 +10,6 @@
 #include "core.h"
 #include "util.h"
 
-typedef struct {
-    size_t nval;
-    size_t bx;
-    size_t by;
-    size_t bz;
-    size_t nblk;
-    size_t data_size;
-    size_t meta_size;
-} SzfpLayout;
-
-static int mul_size(size_t a, size_t b, size_t* out) {
-    if (out == NULL) {
-        return 0;
-    }
-
-    if (a != 0 && b > SIZE_MAX / a) {
-        return 0;
-    }
-
-    *out = a * b;
-    return 1;
-}
-
-static int add_size(size_t a, size_t b, size_t* out) {
-    if (out == NULL) {
-        return 0;
-    }
-
-    if (a > SIZE_MAX - b) {
-        return 0;
-    }
-
-    *out = a + b;
-    return 1;
-}
-
-static int calc_layout(
-    size_t nx,
-    size_t ny,
-    size_t nz,
-    double rate,
-    int block_dim,
-    SzfpLayout* lt
-) {
-    size_t nxy;
-    size_t bxy;
-    size_t off_size;
-    size_t hdr_size;
-
-    if (lt == NULL) {
-        return 0;
-    }
-
-    if (nx == 0 || ny == 0 || nz == 0 || rate <= 0.0 || !isfinite(rate)) {
-        return 0;
-    }
-
-    if (block_dim != 4) {
-        return 0;
-    }
-
-    if (nx % (size_t)block_dim != 0 || ny % (size_t)block_dim != 0 ||
-        nz % (size_t)block_dim != 0) {
-        return 0;
-    }
-
-    memset(lt, 0, sizeof(*lt));
-
-    if (!mul_size(nx, ny, &nxy) || !mul_size(nxy, nz, &lt->nval)) {
-        return 0;
-    }
-
-    lt->bx = nx / (size_t)block_dim;
-    lt->by = ny / (size_t)block_dim;
-    lt->bz = nz / (size_t)block_dim;
-
-    if (!mul_size(lt->bx, lt->by, &bxy) || !mul_size(bxy, lt->bz, &lt->nblk) ||
-        !mul_size(lt->nblk, 2u, &off_size)) {
-        return 0;
-    }
-
-    lt->data_size = (size_t)((double)lt->nval * rate / 8.0);
-    hdr_size = 3u * sizeof(float);
-
-    if (lt->data_size == 0 || !add_size(hdr_size, off_size, &lt->meta_size)) {
-        return 0;
-    }
-
-    return 1;
-}
-
 static SzResult decode_chunk(
     const unsigned char* src,
     size_t src_size,
@@ -267,7 +176,7 @@ SzResult szfp_encode(
         return SZ_ERR_NULL;
     }
 
-    if (!calc_layout(nx, ny, nz, rate, block_dim, &lt)) {
+    if (!szfp_calc_layout(nx, ny, nz, rate, block_dim, &lt)) {
         return SZ_ERR_ARG;
     }
 
@@ -316,7 +225,7 @@ SzResult szfp_meta(
         return SZ_ERR_NULL;
     }
 
-    if (!calc_layout(nx, ny, nz, rate, block_dim, &lt)) {
+    if (!szfp_calc_layout(nx, ny, nz, rate, block_dim, &lt)) {
         return SZ_ERR_ARG;
     }
 

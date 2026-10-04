@@ -5,6 +5,8 @@
 #include <stdint.h>
 
 /*
+ * Each x > threshold function is the range version with hi = +infinity.
+ *
  * The functions here return 0 on success or one of these codes, which are
  * defined in query.c:
  *   1  a required pointer is NULL
@@ -65,38 +67,23 @@ int szfp_plan_gt_chunks(
 );
 
 /**
- * @brief Classify every block for x > threshold with the older unit-order
- *        planner.
+ * @brief Classify every block for lo < x <= hi and list the MAYBE blocks in
+ *        chunk order.
  *
- * It works like szfp_plan_gt_chunks(), but treats each record as its own
- * chunk, so the MAYBE blocks come out in unit order. The Python side then
- * remaps them to chunk order.
- *
- * @param[in]  meta             Zone map of all units, one record each.
- * @param[in]  n_chunk          Number of records.
- * @param[in]  meta_size        Bytes per record, which must be
- *                              12 + 2 * blocks_per_chunk.
- * @param[in]  blocks_per_chunk Blocks covered by one record.
- * @param[in]  threshold        Count values strictly greater than this.
- * @param[in]  threads          OpenMP threads, where <= 0 uses all cores.
- * @param[out] maybe_chunks     Record id of each MAYBE block.
- * @param[out] maybe_blocks     Position of each MAYBE block in its record.
- * @param[in]  maybe_cap        Length of both output arrays, which must be at
- *                              least n_chunk * blocks_per_chunk.
- * @param[out] out_maybe        Number of MAYBE blocks written.
- * @param[out] out_in           Number of IN blocks.
- * @param[out] out_out          Number of OUT blocks.
- *
- * @return 0 on success, 1 if a pointer is NULL, 2 if the sizes do not match
- *         or maybe_cap is too small, 3 if a size overflows, or 4 if scratch
- *         memory runs out.
+ * Same as szfp_plan_gt_chunks() with threshold replaced by lo and hi.
  */
-int szfp_plan_gt(
+int szfp_plan_range_chunks(
     const unsigned char* meta,
-    size_t n_chunk,
     size_t meta_size,
-    size_t blocks_per_chunk,
-    double threshold,
+    size_t ux,
+    size_t uy,
+    size_t uz,
+    size_t sx,
+    size_t sy,
+    size_t sz,
+    size_t blocks_per_unit,
+    double lo,
+    double hi,
     int threads,
     uint32_t* maybe_chunks,
     uint32_t* maybe_blocks,
@@ -130,6 +117,23 @@ int szfp_count_gt_blocks(
     double rate,
     int block_dim,
     double threshold,
+    int threads,
+    size_t* out_count
+);
+
+/**
+ * @brief Decode packed blocks and count the values with lo < x <= hi.
+ *
+ * Same as szfp_count_gt_blocks() with threshold replaced by lo and hi.
+ */
+int szfp_count_range_blocks(
+    const unsigned char* blocks,
+    size_t block_count,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double lo,
+    double hi,
     int threads,
     size_t* out_count
 );
@@ -223,6 +227,25 @@ int szfp_count_offsets(
     double rate,
     int block_dim,
     double threshold,
+    size_t* out_count
+);
+
+/**
+ * @brief Decode the blocks at the given offsets in a buffer and count the
+ *        values with lo < x <= hi.
+ *
+ * Same as szfp_count_offsets() with threshold replaced by lo and hi.
+ */
+int szfp_count_offsets_range(
+    const unsigned char* buf,
+    size_t buf_size,
+    const uint64_t* offsets,
+    size_t n,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double lo,
+    double hi,
     size_t* out_count
 );
 

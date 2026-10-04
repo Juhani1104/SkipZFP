@@ -55,8 +55,8 @@ def test_in_out_guarantees_hold_for_original_and_reconstruction(stored, q):
         coord = np.unravel_index(c, lt.grid_shape)
         sl = tuple(slice(ci * s, (ci + 1) * s) for ci, s in zip(coord, SHAPE))
         meta = codec.native().meta(a[sl], rate, 4)
-        _, _, n_in, n_out = query.native().plan(
-            meta, 1, lt.meta_size, lt.blocks_per_chunk, th, 1
+        _, _, n_in, n_out = query.native().plan_chunks(
+            meta, lt.meta_size, (1, 1, 1), (1, 1, 1), lt.blocks_per_chunk, th, 1
         )
         states = classify(meta, lt, th)
         assert (states == 1).sum() == n_in and (states == 0).sum() == n_out
@@ -200,6 +200,19 @@ def test_open_skipzfp_rejects_options_for_open_array(one, kw, msg):
         query.open_skipzfp(z, **kw)
 
 
+# one call per public query function, so shared checks run on all three
+CALLS = {
+    "gt": lambda z, **kw: query.query_gt(z, 285.0, **kw),
+    "lt": lambda z, **kw: query.query_lt(z, 285.0, **kw),
+    "range": lambda z, **kw: query.query_range(z, 280.0, 285.0, **kw),
+}
+ASYNC_CALLS = {
+    "gt": lambda z: query.query_gt_async(z, 285.0),
+    "lt": lambda z: query.query_lt_async(z, 285.0),
+    "range": lambda z: query.query_range_async(z, 280.0, 285.0),
+}
+
+
 @pytest.mark.parametrize(
     "kw, msg",
     [
@@ -210,15 +223,26 @@ def test_open_skipzfp_rejects_options_for_open_array(one, kw, msg):
         (dict(layer=-1), "layer must be in"),
     ],
 )
-def test_rejects_bad_query_options(one, kw, msg):
+@pytest.mark.parametrize("fn", ("gt", "lt", "range"))
+def test_rejects_bad_query_options(one, fn, kw, msg):
     z, _ = one
     with pytest.raises(ValueError, match=msg):
-        query.query_gt(z, 285.0, **kw)
+        CALLS[fn](z, **kw)
 
 
-def test_async_entry_requires_open_array():
+@pytest.mark.parametrize("fn", ("gt", "lt", "range"))
+def test_async_matches_sync(one, fn):
+    """Each async entry gives the same answer as its sync counterpart."""
+    z, _ = one
+    got = zarr.core.sync.sync(ASYNC_CALLS[fn](z))
+    want = CALLS[fn](z)
+    assert (got.count, got.maybe_blocks) == (want.count, want.maybe_blocks)
+
+
+@pytest.mark.parametrize("fn", ("gt", "lt", "range"))
+def test_async_entry_requires_open_array(fn):
     with pytest.raises(TypeError, match="opened zarr.Array"):
-        zarr.core.sync.sync(query.query_gt_async("not-an-array", 0.0))
+        zarr.core.sync.sync(ASYNC_CALLS[fn]("not-an-array"))
 
 
 def test_rejects_metadata_of_wrong_shape(tmp_path):

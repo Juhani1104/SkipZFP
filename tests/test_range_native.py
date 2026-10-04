@@ -1,4 +1,4 @@
-"""The range C functions in csrc/range.c, called directly through ctypes."""
+"""The range C functions in csrc/query.c, called directly through ctypes."""
 
 import ctypes
 import math

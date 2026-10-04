@@ -1,4 +1,4 @@
-"""The chunk-order planner matches the older unit-order planner block for block."""
+"""The planner classifies every block correctly, for every storage layout."""
 
 import asyncio
 
@@ -8,7 +8,7 @@ import zarr
 
 from skipzfp import codec, query
 
-from helpers import LAYERS, SHAPE, make_array, smooth_field
+from helpers import LAYERS, SHAPE, make_array, smooth_field, true_blocks
 
 FULL = (128, 32, 64)
 CASES = [
@@ -47,18 +47,33 @@ def arrays(tmp_path_factory):
     return a, out
 
 
-def old_plan(meta, lt, th):
-    unit_ids, ranks, n_in, n_out = query.native().plan(
-        meta, int(np.prod(lt.unit_grid)), lt.meta_size, lt.blocks_per_unit, th, 0
-    )
-    chunks, blocks = query.unit_to_chunk(lt, unit_ids, ranks)
-    return chunks, blocks, n_in, n_out
+def stored_blocks(z, lt):
+    """Decoded values of every block, indexed by (chunk id, position in storage)."""
+    rec = z[:]
+    rank = codec.block_rank(lt.unit_shape, codec.find_codec(z).block_order)
+    out = []
+    for coord in query.chunk_coords(lt.grid_shape):
+        sl = tuple(slice(c * s, (c + 1) * s) for c, s in zip(coord, lt.chunk_shape))
+        chunk = rec[sl]
+        for usl in codec.unit_slices(lt.chunk_shape, lt.unit_shape):
+            blocks = true_blocks(chunk[usl])  # C order within the unit
+            ranked = np.empty_like(blocks)
+            ranked[rank] = blocks
+            out.append(ranked)
+    return np.concatenate(out).reshape(-1, lt.blocks_per_chunk, 64)
 
 
 @pytest.mark.parametrize("case", range(len(CASES)))
 @pytest.mark.parametrize("q", QUANTILES)
 @pytest.mark.parametrize("threads", (1, 0))
-def test_chunk_order_plan_matches_unit_plan(arrays, case, q, threads):
+def test_plan_classifies_every_block_correctly(arrays, case, q, threads):
+    """Check the planner's output against the decoded values of every block.
+
+    MAYBE blocks must come out sorted by (chunk, position), and every other block
+    must lie wholly above or wholly at or below the threshold, in numbers that
+    match the IN and OUT counts. This holds for every layout below, including
+    sub_chunk and a reordered block_order.
+    """
     a, arrs = arrays
     z = arrs[case]
     lt = query.get_layout(z)
@@ -67,32 +82,18 @@ def test_chunk_order_plan_matches_unit_plan(arrays, case, q, threads):
     size = lt.meta_size - 4 * (len(lt.layers) - 1)
     th = float(np.quantile(a, q)) + (1.0 if q == 1.0 else 0.0)
     subs = tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape))
-    new = query.native().plan_chunks(
+    chunks, blocks, n_in, n_out = query.native().plan_chunks(
         meta, size, lt.unit_grid, subs, lt.blocks_per_unit, th, threads
     )
-    lt_old = query._Layout(**{**lt.__dict__, "meta_size": size})
-    old = old_plan(meta, lt_old, th)
-    assert np.array_equal(new[0], old[0])
-    assert np.array_equal(new[1], old[1])
-    assert new[2:] == old[2:]
-    assert new[2] + new[3] + len(new[1]) == lt.blocks_per_chunk * int(
-        np.prod(lt.grid_shape)
-    )
 
-
-@pytest.mark.parametrize("case", range(len(CASES)))
-@pytest.mark.parametrize("q", (0.001, 0.5))
-def test_query_same_with_either_planner(arrays, case, q, monkeypatch):
-    a, arrs = arrays
-    th = float(np.quantile(a, q))
-    results = []
-    for fused in (False, True):
-        monkeypatch.setattr(query, "FUSED_PLAN", fused)
-        r = query.query_gt(arrs[case], th, merge_gap_blocks=16)
-        results.append(
-            (r.count, r.maybe_blocks, r.payload_bytes_read, r.payload_requests)
-        )
-    assert results[0] == results[1]
+    key = chunks.astype(np.int64) * lt.blocks_per_chunk + blocks
+    assert np.all(np.diff(key) > 0)
+    vals = stored_blocks(z, lt).reshape(-1, 64)
+    rest = np.ones(len(vals), bool)
+    rest[key] = False
+    assert (vals[rest] > th).all(axis=1).sum() == n_in
+    assert (vals[rest] <= th).all(axis=1).sum() == n_out
+    assert n_in + n_out + len(key) == len(vals)
 
 
 def test_plan_chunks_rejects_bad_geometry():
@@ -101,3 +102,7 @@ def test_plan_chunks_rejects_bad_geometry():
         query.native().plan_chunks(meta, 12 + 2 * 8, (2, 1, 1), (3, 1, 1), 8, 0.0, 1)
     with pytest.raises(RuntimeError):
         query.native().plan_chunks(meta, 12 + 2 * 7, (1, 1, 1), (1, 1, 1), 8, 0.0, 1)
+    with pytest.raises(RuntimeError):
+        query.native().plan_chunks(
+            meta, 12 + 2 * 8, (2, 1, 1), (3, 1, 1), 8, 0.0, 1, 1.0
+        )

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import zfpy
 
-from skipzfp import codec, query
+from skipzfp import codec
 
 from helpers import RATES, SHAPE, decode_one_block, smooth_field, split, true_blocks
 
@@ -53,10 +53,9 @@ def test_constant_chunk_round_trips():
     assert np.array_equal(codec.native().decode(buf, SHAPE, 8.0, 4), a)
 
 
-@pytest.mark.parametrize("native", (codec.native, query.native))
-def test_native_errors_become_exceptions(native):
+def test_native_errors_become_exceptions():
     with pytest.raises(RuntimeError, match="szfp_layout failed"):
-        native().layout(SHAPE, 0.0, 4)
+        codec.native().layout(SHAPE, 0.0, 4)
 
 
 def test_encode_rejects_non_3d():

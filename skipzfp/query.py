@@ -4,6 +4,7 @@ import asyncio
 import collections
 import ctypes
 import itertools
+import math
 import os
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -20,10 +21,8 @@ from zarr.core.buffer import default_buffer_prototype
 from zarr.core.sync import sync
 
 from ._native import load_library
-from .codec import META_ATTR, meta_size
-
-# plan in chunk order in C; False keeps the older unit-order plan + numpy remap
-FUSED_PLAN = True
+from .codec import META_ATTR, find_codec, meta_size
+from .codec import native as codec_native
 
 
 class _Native:
@@ -32,37 +31,11 @@ class _Native:
     def __init__(self) -> None:
         self.lib = load_library()
 
-        self.lib.szfp_layout.argtypes = [
-            ctypes.c_size_t,
-            ctypes.c_size_t,
-            ctypes.c_size_t,
-            ctypes.c_double,
-            ctypes.c_int,
-            ctypes.POINTER(ctypes.c_size_t),
-            ctypes.POINTER(ctypes.c_size_t),
-        ]
-        self.lib.szfp_layout.restype = ctypes.c_int
-
-        self.lib.szfp_plan_gt.argtypes = [
-            ctypes.POINTER(ctypes.c_ubyte),
-            ctypes.c_size_t,
-            ctypes.c_size_t,
-            ctypes.c_size_t,
-            ctypes.c_double,
-            ctypes.c_int,
-            ctypes.POINTER(ctypes.c_uint32),
-            ctypes.POINTER(ctypes.c_uint32),
-            ctypes.c_size_t,
-            ctypes.POINTER(ctypes.c_size_t),
-            ctypes.POINTER(ctypes.c_size_t),
-            ctypes.POINTER(ctypes.c_size_t),
-        ]
-        self.lib.szfp_plan_gt.restype = ctypes.c_int
-
-        self.lib.szfp_plan_gt_chunks.argtypes = [
+        self.lib.szfp_plan_range_chunks.argtypes = [
             ctypes.POINTER(ctypes.c_ubyte),
             *[ctypes.c_size_t] * 8,
             ctypes.c_double,
+            ctypes.c_double,
             ctypes.c_int,
             ctypes.POINTER(ctypes.c_uint32),
             ctypes.POINTER(ctypes.c_uint32),
@@ -71,19 +44,20 @@ class _Native:
             ctypes.POINTER(ctypes.c_size_t),
             ctypes.POINTER(ctypes.c_size_t),
         ]
-        self.lib.szfp_plan_gt_chunks.restype = ctypes.c_int
+        self.lib.szfp_plan_range_chunks.restype = ctypes.c_int
 
-        self.lib.szfp_count_gt_blocks.argtypes = [
+        self.lib.szfp_count_range_blocks.argtypes = [
             ctypes.POINTER(ctypes.c_ubyte),
             ctypes.c_size_t,
             ctypes.c_size_t,
             ctypes.c_double,
             ctypes.c_int,
             ctypes.c_double,
+            ctypes.c_double,
             ctypes.c_int,
             ctypes.POINTER(ctypes.c_size_t),
         ]
-        self.lib.szfp_count_gt_blocks.restype = ctypes.c_int
+        self.lib.szfp_count_range_blocks.restype = ctypes.c_int
 
         self.lib.szfp_merge_ranges.argtypes = [
             ctypes.POINTER(ctypes.c_uint32),
@@ -98,7 +72,7 @@ class _Native:
         ]
         self.lib.szfp_merge_ranges.restype = ctypes.c_int
 
-        self.lib.szfp_count_offsets.argtypes = [
+        self.lib.szfp_count_offsets_range.argtypes = [
             ctypes.c_char_p,
             ctypes.c_size_t,
             ctypes.POINTER(ctypes.c_uint64),
@@ -107,84 +81,15 @@ class _Native:
             ctypes.c_double,
             ctypes.c_int,
             ctypes.c_double,
+            ctypes.c_double,
             ctypes.POINTER(ctypes.c_size_t),
         ]
-        self.lib.szfp_count_offsets.restype = ctypes.c_int
+        self.lib.szfp_count_offsets_range.restype = ctypes.c_int
 
     @staticmethod
     def check(code: int, name: str) -> None:
         if code != 0:
             raise RuntimeError(f"{name} failed: {code}")
-
-    def layout(
-        self,
-        shape: tuple[int, int, int],
-        rate: float,
-        block_dim: int,
-    ) -> tuple[int, int]:
-        """Return the byte sizes of a chunk's payload and of its zone map record."""
-        data_size = ctypes.c_size_t()
-        meta_size = ctypes.c_size_t()
-
-        code = self.lib.szfp_layout(
-            shape[0],
-            shape[1],
-            shape[2],
-            rate,
-            block_dim,
-            ctypes.byref(data_size),
-            ctypes.byref(meta_size),
-        )
-        self.check(code, "szfp_layout")
-
-        return int(data_size.value), int(meta_size.value)
-
-    def plan(
-        self,
-        meta: np.ndarray,
-        n_chunk: int,
-        meta_size: int,
-        n_block: int,
-        th: float,
-        threads: int,
-    ) -> tuple[np.ndarray, np.ndarray, int, int]:
-        """Classify blocks with the older unit-order planner.
-
-        It returns the MAYBE blocks as (unit, rank) pairs, plus the IN and
-        OUT counts. :func:`unit_to_chunk` turns the pairs into chunk order.
-        """
-        src = np.ascontiguousarray(meta, dtype=np.uint8)
-        cap = n_chunk * n_block
-        chunk_ids = np.empty(cap, dtype=np.uint32)
-        block_ids = np.empty(cap, dtype=np.uint32)
-
-        n_maybe = ctypes.c_size_t()
-        n_in = ctypes.c_size_t()
-        n_out = ctypes.c_size_t()
-
-        code = self.lib.szfp_plan_gt(
-            src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
-            n_chunk,
-            meta_size,
-            n_block,
-            th,
-            threads,
-            chunk_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
-            block_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
-            cap,
-            ctypes.byref(n_maybe),
-            ctypes.byref(n_in),
-            ctypes.byref(n_out),
-        )
-        self.check(code, "szfp_plan_gt")
-
-        n = int(n_maybe.value)
-        return (
-            chunk_ids[:n].copy(),
-            block_ids[:n].copy(),
-            int(n_in.value),
-            int(n_out.value),
-        )
 
     def plan_chunks(
         self,
@@ -195,11 +100,12 @@ class _Native:
         blocks_per_unit: int,
         th: float,
         threads: int,
+        hi: float = math.inf,
     ) -> tuple[np.ndarray, np.ndarray, int, int]:
-        """Classify blocks for x > th and return the MAYBE blocks in chunk order.
+        """Classify blocks for th < x <= hi and return the MAYBE blocks in chunk order.
 
         It returns the (chunk, block) ids of the MAYBE blocks, plus the IN
-        and OUT counts.
+        and OUT counts. hi comes last so callers written for x > th still work.
         """
         src = np.ascontiguousarray(meta, dtype=np.uint8)
         cap = int(np.prod(unit_grid)) * blocks_per_unit
@@ -210,13 +116,14 @@ class _Native:
         n_in = ctypes.c_size_t()
         n_out = ctypes.c_size_t()
 
-        code = self.lib.szfp_plan_gt_chunks(
+        code = self.lib.szfp_plan_range_chunks(
             src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             meta_size,
             *unit_grid,
             *subs,
             blocks_per_unit,
             th,
+            hi,
             threads,
             chunk_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
             block_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
@@ -225,7 +132,7 @@ class _Native:
             ctypes.byref(n_in),
             ctypes.byref(n_out),
         )
-        self.check(code, "szfp_plan_gt_chunks")
+        self.check(code, "szfp_plan_range_chunks")
 
         n = int(n_maybe.value)
         return chunk_ids[:n], block_ids[:n], int(n_in.value), int(n_out.value)
@@ -239,25 +146,27 @@ class _Native:
         block_dim: int,
         th: float,
         threads: int,
+        hi: float = math.inf,
     ) -> int:
-        """Decode n_block packed blocks and count values greater than th."""
+        """Decode n_block packed blocks and count values with th < x <= hi."""
         if n_block == 0:
             return 0
 
         src = np.ascontiguousarray(blocks, dtype=np.uint8)
         out = ctypes.c_size_t()
 
-        code = self.lib.szfp_count_gt_blocks(
+        code = self.lib.szfp_count_range_blocks(
             src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             n_block,
             block_size,
             rate,
             block_dim,
             th,
+            hi,
             threads,
             ctypes.byref(out),
         )
-        self.check(code, "szfp_count_gt_blocks")
+        self.check(code, "szfp_count_range_blocks")
         return int(out.value)
 
     def merge(
@@ -304,12 +213,13 @@ class _Native:
         rate: float,
         block_dim: int,
         th: float,
+        hi: float = math.inf,
     ) -> int:
-        """Decode the blocks at the given byte offsets in data and count x > th."""
+        """Decode the blocks at the given byte offsets and count th < x <= hi."""
         offs = np.ascontiguousarray(offsets, dtype=np.uint64)
         out = ctypes.c_size_t()
 
-        code = self.lib.szfp_count_offsets(
+        code = self.lib.szfp_count_offsets_range(
             data,
             len(data),
             offs.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
@@ -318,9 +228,10 @@ class _Native:
             rate,
             block_dim,
             th,
+            hi,
             ctypes.byref(out),
         )
-        self.check(code, "szfp_count_offsets")
+        self.check(code, "szfp_count_offsets_range")
         return int(out.value)
 
 
@@ -510,21 +421,6 @@ def ceildiv(a: int, b: int) -> int:
     return (a + b - 1) // b
 
 
-def find_codec(arr: zarr.Array) -> Any:
-    """Return the skipzfp codec of arr, matching by name rather than by class."""
-    for codec in arr.metadata.codecs:
-        if getattr(codec, "codec_name", None) == "skipzfp":
-            return codec
-
-        to_dict = getattr(codec, "to_dict", None)
-        if callable(to_dict):
-            data = to_dict()
-            if isinstance(data, dict) and data.get("name") == "skipzfp":
-                return codec
-
-    raise ValueError("array does not use the skipzfp codec")
-
-
 def get_layout(arr: zarr.Array) -> _Layout:
     """Verify that arr can be queried and return its byte layout."""
     if len(arr.shape) != 3:
@@ -558,7 +454,7 @@ def get_layout(arr: zarr.Array) -> _Layout:
     blocks_per_chunk = int(np.prod(blocks_axis))
     values_per_block = block_dim**3
 
-    data_size, _ = native().layout(
+    data_size, _ = codec_native().layout(
         chunk_shape,
         rate,
         block_dim,
@@ -701,34 +597,6 @@ async def read_meta(arr: zarr.Array, lt: _Layout) -> tuple[np.ndarray, int, int]
     return data, data.nbytes, n_obj
 
 
-def unit_to_chunk(
-    lt: _Layout, unit_ids: np.ndarray, ranks: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """Turn the older planner's (unit, rank) pairs into chunk-order ids.
-
-    It is only used when FUSED_PLAN is False.
-    """
-    subs = tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape))
-    n_unit = int(np.prod(lt.unit_grid))
-    u = np.unravel_index(np.arange(n_unit), lt.unit_grid)
-    u_chunk = np.ravel_multi_index(
-        tuple(x // s for x, s in zip(u, subs)), lt.grid_shape
-    )
-    u_sub = np.ravel_multi_index(tuple(x % s for x, s in zip(u, subs)), subs)
-
-    counts = np.bincount(unit_ids, minlength=n_unit)
-    starts = np.cumsum(counts) - counts
-    u_order = np.lexsort((u_sub, u_chunk))
-    seg = counts[u_order]
-    perm = np.repeat(starts[u_order] - (np.cumsum(seg) - seg), seg) + np.arange(
-        len(unit_ids)
-    )
-
-    uid = unit_ids[perm]
-    blocks = u_sub[uid] * lt.blocks_per_unit + ranks[perm].astype(np.int64)
-    return u_chunk[uid].astype(np.uint32), blocks.astype(np.uint32)
-
-
 def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
     """Keep only one layer's error bound in each record of the zone map.
 
@@ -750,10 +618,11 @@ async def stream_count(
     block_size: int,
     rate: float,
     block_dim: int,
-    threshold: float,
+    lo: float,
+    hi: float,
     concurrency: int,
 ) -> tuple[int, int, float]:
-    """Read each merged range and count x > threshold as soon as it arrives.
+    """Read each merged range and count lo < x <= hi as soon as it arrives.
 
     It returns the count, the bytes read and the decode seconds summed over
     all reads.
@@ -763,7 +632,7 @@ async def stream_count(
 
     def count(data: bytes, offs: np.ndarray) -> tuple[int, float]:
         t0 = time.perf_counter()
-        n = native().count_offsets(data, offs, block_size, rate, block_dim, threshold)
+        n = native().count_offsets(data, offs, block_size, rate, block_dim, lo, hi)
         return n, time.perf_counter() - t0
 
     async def one(req: _MergedRange) -> tuple[int, int, float]:
@@ -828,9 +697,10 @@ def merge_ranges(
     return out, blocks
 
 
-async def query_gt_async(
+async def _query_async(
     arr: zarr.Array,
-    threshold: float,
+    lo: float,
+    hi: float,
     *,
     threads: int = 0,
     request_concurrency: int = 32,
@@ -839,17 +709,12 @@ async def query_gt_async(
     layer: int | None = None,
     max_chunk_requests: int = 1,
 ) -> QueryResult:
-    """Async version of query_gt for an already opened array.
+    """Count values with lo < x <= hi. Either bound may be infinite.
 
-    It takes the same keyword arguments as :func:`query_gt` except
-    array_path and storage_options, and is useful for running several
-    queries concurrently.
-
-    Raises:
-        TypeError: If arr is not an opened zarr.Array.
+    This is the shared core of :func:`query_gt` and :func:`query_range`.
     """
     if not isinstance(arr, zarr.Array):
-        raise TypeError("query_gt_async expects an opened zarr.Array")
+        raise TypeError("the query expects an opened zarr.Array")
 
     if request_concurrency <= 0:
         raise ValueError("request_concurrency must be greater than 0")
@@ -880,28 +745,17 @@ async def query_gt_async(
     # the chosen layer's error bound, so the C planner sees a single-layer
     # record that is 4 bytes per extra layer shorter.
     t1 = time.perf_counter()
-    if FUSED_PLAN:
-        chunk_ids, block_ids, n_in, n_out = await asyncio.to_thread(
-            native().plan_chunks,
-            plan_meta(meta, lt, layer),
-            lt.meta_size - 4 * (len(lt.layers) - 1),
-            lt.unit_grid,
-            tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape)),
-            lt.blocks_per_unit,
-            float(threshold),
-            threads,
-        )
-    else:
-        unit_ids, ranks, n_in, n_out = await asyncio.to_thread(
-            native().plan,
-            plan_meta(meta, lt, layer),
-            int(np.prod(lt.unit_grid)),
-            lt.meta_size - 4 * (len(lt.layers) - 1),
-            lt.blocks_per_unit,
-            float(threshold),
-            threads,
-        )
-        chunk_ids, block_ids = unit_to_chunk(lt, unit_ids, ranks)
+    chunk_ids, block_ids, n_in, n_out = await asyncio.to_thread(
+        native().plan_chunks,
+        plan_meta(meta, lt, layer),
+        lt.meta_size - 4 * (len(lt.layers) - 1),
+        lt.unit_grid,
+        tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape)),
+        lt.blocks_per_unit,
+        lo,
+        threads,
+        hi,
+    )
     plan_sec = time.perf_counter() - t1
 
     # 3. turn MAYBE blocks into byte-range reads. Each layer is stored as its
@@ -948,7 +802,8 @@ async def query_gt_async(
             lt.layer_bytes[0],
             rate,
             lt.block_dim,
-            float(threshold),
+            lo,
+            hi,
             request_concurrency,
         )
         payload_read_sec = time.perf_counter() - t1
@@ -995,14 +850,14 @@ async def query_gt_async(
                 )
             else:
                 c = chunk_of[item]
-                lo, hi = np.searchsorted(sorted_chunks, [c, c + 1])
-                ids = sorted_blocks[lo:hi].astype(np.int64)
+                b_lo, b_hi = np.searchsorted(sorted_chunks, [c, c + 1])
+                ids = sorted_blocks[b_lo:b_hi].astype(np.int64)
                 for jj in range(layer + 1):
                     seg = buf[
                         lt.layer_starts[jj] : lt.layer_starts[jj]
                         + lt.blocks_per_chunk * lt.layer_bytes[jj]
                     ]
-                    out[lo:hi, cols[jj] : cols[jj + 1]] = seg.reshape(
+                    out[b_lo:b_hi, cols[jj] : cols[jj + 1]] = seg.reshape(
                         -1, lt.layer_bytes[jj]
                     )[ids]
         blocks = out.reshape(-1)
@@ -1015,8 +870,9 @@ async def query_gt_async(
             block_size,
             rate,
             lt.block_dim,
-            float(threshold),
+            lo,
             threads,
+            hi,
         )
         decode_sec = time.perf_counter() - t1
         payload_bytes = sum(len(x) for x in payload_parts)
@@ -1047,10 +903,109 @@ async def query_gt_async(
     )
 
 
+def _run(
+    source: Any,
+    lo: float,
+    hi: float,
+    array_path: str,
+    storage_options: Mapping[str, Any] | None,
+    **kwargs: Any,
+) -> QueryResult:
+    """Open source and count lo < x <= hi on it."""
+    arr = open_skipzfp(source, array_path=array_path, storage_options=storage_options)
+    return sync(_query_async(arr, lo, hi, **kwargs))
+
+
+def _below_f32(x: float) -> float:
+    """Largest float32 strictly below x (-inf if there is none)."""
+    f = np.float32(x)
+    if float(f) >= x:
+        f = np.nextafter(f, np.float32(-np.inf))
+    return float(f)
+
+
+def range_bounds(
+    lo: float | None,
+    hi: float | None,
+    lo_inclusive: bool = False,
+    hi_inclusive: bool = True,
+) -> tuple[float, float]:
+    """Map a range on float32 values to the half-open (lo, hi] the planner uses.
+
+    Decoded values are float32, so x >= a is exactly x > (largest float32 < a),
+    and x < b is exactly x <= (largest float32 < b).
+
+    Args:
+        lo: Lower bound, or None for no lower bound.
+        hi: Upper bound, or None for no upper bound.
+        lo_inclusive: Use lo <= x instead of lo < x.
+        hi_inclusive: Use x <= hi, or x < hi when False.
+
+    Returns:
+        (a, b) such that a < x <= b selects the same float32 values, with
+        a missing bound mapped to -inf or inf.
+
+    Raises:
+        ValueError: If lo or hi is NaN, or if lo > hi.
+    """
+    for name, v in (("lo", lo), ("hi", hi)):
+        if v is not None and math.isnan(v):
+            raise ValueError(f"{name} must not be NaN")
+    if lo is not None and hi is not None and lo > hi:
+        raise ValueError("lo must not exceed hi")
+    if lo is None:
+        a = -math.inf
+    else:
+        a = _below_f32(float(lo)) if lo_inclusive else float(lo)
+    if hi is None:
+        b = math.inf
+    else:
+        b = float(hi) if hi_inclusive else _below_f32(float(hi))
+    return a, b
+
+
+async def query_gt_async(
+    arr: zarr.Array,
+    threshold: float,
+    *,
+    inclusive: bool = False,
+    threads: int = 0,
+    request_concurrency: int = 32,
+    request_batch_size: int | None = None,
+    merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
+) -> QueryResult:
+    """Async version of :func:`query_gt` for an already opened array.
+
+    It takes the same keyword arguments as :func:`query_gt` except
+    array_path and storage_options, and is useful for running several
+    queries concurrently.
+
+    Raises:
+        TypeError: If arr is not an opened zarr.Array.
+    """
+    if not isinstance(arr, zarr.Array):
+        raise TypeError("query_gt_async expects an opened zarr.Array")
+    lo, hi = range_bounds(threshold, None, lo_inclusive=inclusive)
+    return await _query_async(
+        arr,
+        lo,
+        hi,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
+    )
+
+
 def query_gt(
     source: Any,
     threshold: float,
     *,
+    inclusive: bool = False,
     array_path: str = "",
     storage_options: Mapping[str, Any] | None = None,
     threads: int = 0,
@@ -1073,6 +1028,7 @@ def query_gt(
     Args:
         source: An opened zarr.Array, or a local path or URL to open.
         threshold: Count values strictly greater than this.
+        inclusive: Use x >= threshold instead of x > threshold.
         array_path: Path of the array inside the store, when source is
             not an opened array.
         storage_options: Options for a cloud store, such as credentials,
@@ -1095,8 +1051,8 @@ def query_gt(
         and the bytes, requests and seconds spent in each stage.
 
     Raises:
-        ValueError: If the array's shape or chunking is not supported, it
-            does not use the skipzfp codec, it has no zone map (see
+        ValueError: If threshold is NaN, the array's shape or chunking is not
+            supported, it does not use the skipzfp codec, it has no zone map (see
             :func:`write_meta`), or an argument is out of range.
         RuntimeError: If source is a URL and its fsspec backend is missing.
         FileNotFoundError: If a chunk the query needs is missing.
@@ -1105,21 +1061,215 @@ def query_gt(
         >>> r = query_gt("data/t2m.zarr", 295.0)
         >>> print(r.count, r.bytes_read)
     """
-    arr = open_skipzfp(
+
+    lo, hi = range_bounds(threshold, None, lo_inclusive=inclusive)
+    return _run(
         source,
-        array_path=array_path,
-        storage_options=storage_options,
+        lo,
+        hi,
+        array_path,
+        storage_options,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
     )
 
-    return sync(
-        query_gt_async(
-            arr,
-            threshold,
-            threads=threads,
-            request_concurrency=request_concurrency,
-            request_batch_size=request_batch_size,
-            merge_gap_blocks=merge_gap_blocks,
-            layer=layer,
-            max_chunk_requests=max_chunk_requests,
+
+async def query_lt_async(
+    arr: zarr.Array,
+    threshold: float,
+    *,
+    inclusive: bool = False,
+    threads: int = 0,
+    request_concurrency: int = 32,
+    request_batch_size: int | None = None,
+    merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
+) -> QueryResult:
+    """Async version of :func:`query_lt` for an already opened array.
+
+    It takes the same keyword arguments as :func:`query_lt` except
+    array_path and storage_options, and is useful for running several
+    queries concurrently.
+
+    Raises:
+        TypeError: If arr is not an opened zarr.Array.
+    """
+    if not isinstance(arr, zarr.Array):
+        raise TypeError("query_lt_async expects an opened zarr.Array")
+    lo, hi = range_bounds(None, threshold, hi_inclusive=inclusive)
+    return await _query_async(
+        arr,
+        lo,
+        hi,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
+    )
+
+
+def query_lt(
+    source: Any,
+    threshold: float,
+    *,
+    inclusive: bool = False,
+    array_path: str = "",
+    storage_options: Mapping[str, Any] | None = None,
+    threads: int = 0,
+    request_concurrency: int = 32,
+    request_batch_size: int | None = None,
+    merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
+) -> QueryResult:
+    """Count values less than threshold in a SkipZFP array.
+
+    It is the mirror image of :func:`query_gt` and takes the same arguments.
+
+    Args:
+        source: An opened zarr.Array, or a local path or URL to open.
+        threshold: Count values strictly less than this.
+        inclusive: Use x <= threshold instead of x < threshold.
+        array_path, storage_options, threads, request_concurrency,
+        request_batch_size, merge_gap_blocks, layer, max_chunk_requests:
+            Same as in :func:`query_gt`.
+
+    Returns:
+        QueryResult, as in :func:`query_gt`.
+
+    Raises:
+        ValueError: In any case where :func:`query_gt` raises it.
+
+    Example:
+        >>> query_lt("data/t2m.zarr", 273.15).count  # x < 273.15
+    """
+    lo, hi = range_bounds(None, threshold, hi_inclusive=inclusive)
+    return _run(
+        source,
+        lo,
+        hi,
+        array_path,
+        storage_options,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
+    )
+
+
+async def query_range_async(
+    arr: zarr.Array,
+    lo: float,
+    hi: float,
+    *,
+    lo_inclusive: bool = False,
+    hi_inclusive: bool = True,
+    threads: int = 0,
+    request_concurrency: int = 32,
+    request_batch_size: int | None = None,
+    merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
+) -> QueryResult:
+    """Async version of :func:`query_range` for an already opened array.
+
+    It takes the same keyword arguments as :func:`query_range` except
+    array_path and storage_options, and is useful for running several
+    queries concurrently.
+
+    Raises:
+        TypeError: If arr is not an opened zarr.Array.
+    """
+    if lo is None or hi is None:
+        raise TypeError(
+            "query_range needs both bounds; use query_gt or query_lt for one side"
         )
+    a, b = range_bounds(lo, hi, lo_inclusive, hi_inclusive)
+    return await _query_async(
+        arr,
+        a,
+        b,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
+    )
+
+
+def query_range(
+    source: Any,
+    lo: float,
+    hi: float,
+    *,
+    lo_inclusive: bool = False,
+    hi_inclusive: bool = True,
+    array_path: str = "",
+    storage_options: Mapping[str, Any] | None = None,
+    threads: int = 0,
+    request_concurrency: int = 32,
+    request_batch_size: int | None = None,
+    merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
+) -> QueryResult:
+    """Count values between two bounds, by default lo < x <= hi.
+
+    This function works like :func:`query_gt`. It uses the zone map to
+    count or skip whole blocks, and decodes only the blocks that lie
+    partly inside the range. For a one-sided bound, use :func:`query_gt`
+    or :func:`query_lt`.
+
+    The count equals what you get by decompressing the whole array and
+    counting. It can differ slightly from counting the original data,
+    because ZFP compression is lossy.
+
+    Args:
+        source: An opened zarr.Array, or a local path or URL to open.
+        lo: Lower bound.
+        hi: Upper bound.
+        lo_inclusive: Use lo <= x instead of lo < x.
+        hi_inclusive: Use x <= hi, or x < hi when False.
+        array_path, storage_options, threads, request_concurrency,
+        request_batch_size, merge_gap_blocks, layer, max_chunk_requests:
+            Same as in :func:`query_gt`.
+
+    Returns:
+        QueryResult, as in :func:`query_gt`.
+
+    Raises:
+        TypeError: If lo or hi is None.
+        ValueError: If lo or hi is NaN, if lo > hi, or in any case where
+            :func:`query_gt` raises it.
+
+    Example:
+        >>> query_range("data/t2m.zarr", 290.0, 295.0).count  # 290 < x <= 295
+    """
+    if lo is None or hi is None:
+        raise TypeError(
+            "query_range needs both bounds; use query_gt or query_lt for one side"
+        )
+    a, b = range_bounds(lo, hi, lo_inclusive, hi_inclusive)
+    return _run(
+        source,
+        a,
+        b,
+        array_path,
+        storage_options,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
     )
