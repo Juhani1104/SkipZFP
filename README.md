@@ -56,7 +56,7 @@ ZFP_DIR=/path/to/zfp pip install -e .
 ```python
 import numpy as np
 import zarr
-from skipzfp import SkipZFPCodec, query_gt, query_range, write_meta
+from skipzfp import SkipZFPCodec, query_gt, query_lt, query_range, write_meta
 
 # a smooth synthetic field: 256 hours on a 128 x 256 grid
 t, y, x = np.meshgrid(np.arange(256), np.arange(128), np.arange(256), indexing="ij")
@@ -82,15 +82,16 @@ r = query_gt(z, 295.0)
 print(r.count, r.bytes_read, r.maybe_blocks, r.total_blocks)
 # 630563 588800 5056 131072
 
-# count(290 < x <= 295); leave out lo or hi for a one-sided range
+# count(290 < x <= 295); query_lt counts x < T the same way query_gt counts x > T
 r = query_range(z, 290.0, 295.0)
 print(r.count, r.maybe_blocks)
 # 1022169 13959
 ```
 
-`query_gt` and `query_range` take an opened Zarr array on any store (the experiments
-read from Google Cloud Storage) or a path, and the result also reports bytes, requests
-and time per stage. `query_range` counts `lo < x <= hi` by default; `lo_inclusive` and
+`query_gt`, `query_lt` and `query_range` take an opened Zarr array on any store (the
+experiments read from Google Cloud Storage) or a path, and the result also reports
+bytes, requests and time per stage. `query_gt` and `query_lt` take `inclusive=True` for
+`>=` and `<=`; `query_range` counts `lo < x <= hi` by default, and `lo_inclusive` and
 `hi_inclusive` switch either end.
 
 ## How it works
@@ -175,8 +176,8 @@ experiments/    data download, experiments, results, cloud runner
 
 - float32, 3D arrays only; the array shape must be a whole number of chunks.
 - NaN and infinite values are rejected (ZFP cannot encode them).
-- Queries count values in a range (`query_gt`, `query_range`); other predicates and
-  aggregates live in the experiments.
+- Queries count values in a range (`query_gt`, `query_lt`, `query_range`); other
+  predicates and aggregates live in the experiments.
 
 ## Citation
 

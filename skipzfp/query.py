@@ -1058,118 +1058,17 @@ async def _query_async(
     )
 
 
-async def query_gt_async(
-    arr: zarr.Array,
-    threshold: float,
-    *,
-    threads: int = 0,
-    request_concurrency: int = 32,
-    request_batch_size: int | None = None,
-    merge_gap_blocks: int = 0,
-    layer: int | None = None,
-    max_chunk_requests: int = 1,
-) -> QueryResult:
-    """Async version of query_gt for an already opened array.
-
-    It takes the same keyword arguments as :func:`query_gt` except
-    array_path and storage_options, and is useful for running several
-    queries concurrently.
-
-    Raises:
-        TypeError: If arr is not an opened zarr.Array.
-    """
-    if not isinstance(arr, zarr.Array):
-        raise TypeError("query_gt_async expects an opened zarr.Array")
-    return await _query_async(
-        arr,
-        float(threshold),
-        math.inf,
-        threads=threads,
-        request_concurrency=request_concurrency,
-        request_batch_size=request_batch_size,
-        merge_gap_blocks=merge_gap_blocks,
-        layer=layer,
-        max_chunk_requests=max_chunk_requests,
-    )
-
-
-def query_gt(
+def _run(
     source: Any,
-    threshold: float,
-    *,
-    array_path: str = "",
-    storage_options: Mapping[str, Any] | None = None,
-    threads: int = 0,
-    request_concurrency: int = 32,
-    request_batch_size: int | None = None,
-    merge_gap_blocks: int = 0,
-    layer: int | None = None,
-    max_chunk_requests: int = 1,
+    lo: float,
+    hi: float,
+    array_path: str,
+    storage_options: Mapping[str, Any] | None,
+    **kwargs: Any,
 ) -> QueryResult:
-    """Count values greater than threshold in a SkipZFP array.
-
-    The zone map shows which blocks lie entirely above or below the
-    threshold, so those blocks are counted or skipped without being read,
-    and only the remaining blocks are downloaded and decoded.
-
-    The count equals what you get by decompressing the whole array and
-    counting. It can differ slightly from counting the original data,
-    because ZFP compression is lossy.
-
-    Args:
-        source: An opened zarr.Array, or a local path or URL to open.
-        threshold: Count values strictly greater than this.
-        array_path: Path of the array inside the store, when source is
-            not an opened array.
-        storage_options: Options for a cloud store, such as credentials,
-            passed to fsspec when source is a URL.
-        threads: C threads for planning, and for decoding when layer > 0,
-            where 0 uses all cores.
-        request_concurrency: Maximum number of reads running at a time.
-        request_batch_size: Number of reads issued per batch when
-            layer > 0, 4 * request_concurrency by default.
-        merge_gap_blocks: Merge two reads in the same chunk when at most
-            this many unneeded blocks lie between them, so larger values
-            mean fewer requests but more bytes read.
-        layer: Precision layer to read for arrays written with layers,
-            where 0 is the lowest rate and None reads the full rate.
-        max_chunk_requests: When layer > 0, a chunk that would need more
-            than this many reads is fetched in a single read instead.
-
-    Returns:
-        QueryResult with the count, the number of IN, OUT and MAYBE blocks,
-        and the bytes, requests and seconds spent in each stage.
-
-    Raises:
-        ValueError: If the array's shape or chunking is not supported, it
-            does not use the skipzfp codec, it has no zone map (see
-            :func:`write_meta`), or an argument is out of range.
-        RuntimeError: If source is a URL and its fsspec backend is missing.
-        FileNotFoundError: If a chunk the query needs is missing.
-
-    Example:
-        >>> r = query_gt("data/t2m.zarr", 295.0)
-        >>> print(r.count, r.bytes_read)
-    """
-    arr = open_skipzfp(
-        source,
-        array_path=array_path,
-        storage_options=storage_options,
-    )
-
-    return sync(
-        _query_async(
-            arr,
-            float(threshold),
-            math.inf,
-            threads=threads,
-            request_concurrency=request_concurrency,
-            request_batch_size=request_batch_size,
-            merge_gap_blocks=merge_gap_blocks,
-            layer=layer,
-            max_chunk_requests=max_chunk_requests,
-        )
-    )
+    """Open source and count lo < x <= hi on it."""
+    arr = open_skipzfp(source, array_path=array_path, storage_options=storage_options)
+    return sync(_query_async(arr, lo, hi, **kwargs))
 
 
 def _below_f32(x: float) -> float:
@@ -1220,14 +1119,221 @@ def range_bounds(
     return a, b
 
 
+async def query_gt_async(
+    arr: zarr.Array,
+    threshold: float,
+    *,
+    inclusive: bool = False,
+    threads: int = 0,
+    request_concurrency: int = 32,
+    request_batch_size: int | None = None,
+    merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
+) -> QueryResult:
+    """Async version of :func:`query_gt` for an already opened array.
+
+    It takes the same keyword arguments as :func:`query_gt` except
+    array_path and storage_options, and is useful for running several
+    queries concurrently.
+
+    Raises:
+        TypeError: If arr is not an opened zarr.Array.
+    """
+    if not isinstance(arr, zarr.Array):
+        raise TypeError("query_gt_async expects an opened zarr.Array")
+    lo, hi = range_bounds(threshold, None, lo_inclusive=inclusive)
+    return await _query_async(
+        arr,
+        lo,
+        hi,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
+    )
+
+
+def query_gt(
+    source: Any,
+    threshold: float,
+    *,
+    inclusive: bool = False,
+    array_path: str = "",
+    storage_options: Mapping[str, Any] | None = None,
+    threads: int = 0,
+    request_concurrency: int = 32,
+    request_batch_size: int | None = None,
+    merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
+) -> QueryResult:
+    """Count values greater than threshold in a SkipZFP array.
+
+    The zone map shows which blocks lie entirely above or below the
+    threshold, so those blocks are counted or skipped without being read,
+    and only the remaining blocks are downloaded and decoded.
+
+    The count equals what you get by decompressing the whole array and
+    counting. It can differ slightly from counting the original data,
+    because ZFP compression is lossy.
+
+    Args:
+        source: An opened zarr.Array, or a local path or URL to open.
+        threshold: Count values strictly greater than this.
+        inclusive: Use x >= threshold instead of x > threshold.
+        array_path: Path of the array inside the store, when source is
+            not an opened array.
+        storage_options: Options for a cloud store, such as credentials,
+            passed to fsspec when source is a URL.
+        threads: C threads for planning, and for decoding when layer > 0,
+            where 0 uses all cores.
+        request_concurrency: Maximum number of reads running at a time.
+        request_batch_size: Number of reads issued per batch when
+            layer > 0, 4 * request_concurrency by default.
+        merge_gap_blocks: Merge two reads in the same chunk when at most
+            this many unneeded blocks lie between them, so larger values
+            mean fewer requests but more bytes read.
+        layer: Precision layer to read for arrays written with layers,
+            where 0 is the lowest rate and None reads the full rate.
+        max_chunk_requests: When layer > 0, a chunk that would need more
+            than this many reads is fetched in a single read instead.
+
+    Returns:
+        QueryResult with the count, the number of IN, OUT and MAYBE blocks,
+        and the bytes, requests and seconds spent in each stage.
+
+    Raises:
+        ValueError: If threshold is NaN, the array's shape or chunking is not
+            supported, it does not use the skipzfp codec, it has no zone map (see
+            :func:`write_meta`), or an argument is out of range.
+        RuntimeError: If source is a URL and its fsspec backend is missing.
+        FileNotFoundError: If a chunk the query needs is missing.
+
+    Example:
+        >>> r = query_gt("data/t2m.zarr", 295.0)
+        >>> print(r.count, r.bytes_read)
+    """
+
+    lo, hi = range_bounds(threshold, None, lo_inclusive=inclusive)
+    return _run(
+        source,
+        lo,
+        hi,
+        array_path,
+        storage_options,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
+    )
+
+
+async def query_lt_async(
+    arr: zarr.Array,
+    threshold: float,
+    *,
+    inclusive: bool = False,
+    threads: int = 0,
+    request_concurrency: int = 32,
+    request_batch_size: int | None = None,
+    merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
+) -> QueryResult:
+    """Async version of :func:`query_lt` for an already opened array.
+
+    It takes the same keyword arguments as :func:`query_lt` except
+    array_path and storage_options, and is useful for running several
+    queries concurrently.
+
+    Raises:
+        TypeError: If arr is not an opened zarr.Array.
+    """
+    if not isinstance(arr, zarr.Array):
+        raise TypeError("query_lt_async expects an opened zarr.Array")
+    lo, hi = range_bounds(None, threshold, hi_inclusive=inclusive)
+    return await _query_async(
+        arr,
+        lo,
+        hi,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
+    )
+
+
+def query_lt(
+    source: Any,
+    threshold: float,
+    *,
+    inclusive: bool = False,
+    array_path: str = "",
+    storage_options: Mapping[str, Any] | None = None,
+    threads: int = 0,
+    request_concurrency: int = 32,
+    request_batch_size: int | None = None,
+    merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
+) -> QueryResult:
+    """Count values less than threshold in a SkipZFP array.
+
+    It is the mirror image of :func:`query_gt` and takes the same arguments.
+
+    Args:
+        source: An opened zarr.Array, or a local path or URL to open.
+        threshold: Count values strictly less than this.
+        inclusive: Use x <= threshold instead of x < threshold.
+        array_path, storage_options, threads, request_concurrency,
+        request_batch_size, merge_gap_blocks, layer, max_chunk_requests:
+            Same as in :func:`query_gt`.
+
+    Returns:
+        QueryResult, as in :func:`query_gt`.
+
+    Raises:
+        ValueError: In any case where :func:`query_gt` raises it.
+
+    Example:
+        >>> query_lt("data/t2m.zarr", 273.15).count  # x < 273.15
+    """
+    lo, hi = range_bounds(None, threshold, hi_inclusive=inclusive)
+    return _run(
+        source,
+        lo,
+        hi,
+        array_path,
+        storage_options,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
+    )
+
+
 async def query_range_async(
     arr: zarr.Array,
-    lo: float | None = None,
-    hi: float | None = None,
+    lo: float,
+    hi: float,
     *,
     lo_inclusive: bool = False,
     hi_inclusive: bool = True,
-    **kwargs: Any,
+    threads: int = 0,
+    request_concurrency: int = 32,
+    request_batch_size: int | None = None,
+    merge_gap_blocks: int = 0,
+    layer: int | None = None,
+    max_chunk_requests: int = 1,
 ) -> QueryResult:
     """Async version of :func:`query_range` for an already opened array.
 
@@ -1238,14 +1344,28 @@ async def query_range_async(
     Raises:
         TypeError: If arr is not an opened zarr.Array.
     """
+    if lo is None or hi is None:
+        raise TypeError(
+            "query_range needs both bounds; use query_gt or query_lt for one side"
+        )
     a, b = range_bounds(lo, hi, lo_inclusive, hi_inclusive)
-    return await _query_async(arr, a, b, **kwargs)
+    return await _query_async(
+        arr,
+        a,
+        b,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
+    )
 
 
 def query_range(
     source: Any,
-    lo: float | None = None,
-    hi: float | None = None,
+    lo: float,
+    hi: float,
     *,
     lo_inclusive: bool = False,
     hi_inclusive: bool = True,
@@ -1258,11 +1378,12 @@ def query_range(
     layer: int | None = None,
     max_chunk_requests: int = 1,
 ) -> QueryResult:
-    """Count values in a range, by default lo < x <= hi.
+    """Count values between two bounds, by default lo < x <= hi.
 
     This function works like :func:`query_gt`. It uses the zone map to
     count or skip whole blocks, and decodes only the blocks that lie
-    partly inside the range.
+    partly inside the range. For a one-sided bound, use :func:`query_gt`
+    or :func:`query_lt`.
 
     The count equals what you get by decompressing the whole array and
     counting. It can differ slightly from counting the original data,
@@ -1270,8 +1391,8 @@ def query_range(
 
     Args:
         source: An opened zarr.Array, or a local path or URL to open.
-        lo: Lower bound, or None for no lower bound.
-        hi: Upper bound, or None for no upper bound.
+        lo: Lower bound.
+        hi: Upper bound.
         lo_inclusive: Use lo <= x instead of lo < x.
         hi_inclusive: Use x <= hi, or x < hi when False.
         array_path, storage_options, threads, request_concurrency,
@@ -1282,25 +1403,28 @@ def query_range(
         QueryResult, as in :func:`query_gt`.
 
     Raises:
+        TypeError: If lo or hi is None.
         ValueError: If lo or hi is NaN, if lo > hi, or in any case where
             :func:`query_gt` raises it.
 
     Example:
         >>> query_range("data/t2m.zarr", 290.0, 295.0).count  # 290 < x <= 295
-        >>> query_range("data/t2m.zarr", hi=273.15, hi_inclusive=False).count
     """
-    arr = open_skipzfp(source, array_path=array_path, storage_options=storage_options)
-    a, b = range_bounds(lo, hi, lo_inclusive, hi_inclusive)
-    return sync(
-        _query_async(
-            arr,
-            a,
-            b,
-            threads=threads,
-            request_concurrency=request_concurrency,
-            request_batch_size=request_batch_size,
-            merge_gap_blocks=merge_gap_blocks,
-            layer=layer,
-            max_chunk_requests=max_chunk_requests,
+    if lo is None or hi is None:
+        raise TypeError(
+            "query_range needs both bounds; use query_gt or query_lt for one side"
         )
+    a, b = range_bounds(lo, hi, lo_inclusive, hi_inclusive)
+    return _run(
+        source,
+        a,
+        b,
+        array_path,
+        storage_options,
+        threads=threads,
+        request_concurrency=request_concurrency,
+        request_batch_size=request_batch_size,
+        merge_gap_blocks=merge_gap_blocks,
+        layer=layer,
+        max_chunk_requests=max_chunk_requests,
     )

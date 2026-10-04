@@ -1,4 +1,4 @@
-"""query_range matches a brute-force count for every kind of bound."""
+"""query_gt, query_lt and query_range match a brute-force count for any bounds."""
 
 import math
 
@@ -51,13 +51,24 @@ def bounds(a):
     ]
 
 
+def run(z, lo, hi, **kw):
+    """Count lo < x <= hi with whichever public function fits the bounds."""
+    if hi is None and lo is None:
+        return query.query_range(z, -math.inf, math.inf, **kw)
+    if hi is None:
+        return query.query_gt(z, lo, **kw)
+    if lo is None:
+        return query.query_lt(z, hi, inclusive=True, **kw)
+    return query.query_range(z, lo, hi, **kw)
+
+
 @pytest.mark.parametrize("name", ("plain", "sub_t", "layers"))
 @pytest.mark.parametrize("k", range(8))
 @pytest.mark.parametrize("gap", (0, 64))
 def test_range_matches_brute_force(data, name, k, gap):
     a, arrs, dec, _ = data
     lo, hi = bounds(a)[k]
-    r = range_query.query_range(arrs[name], lo, hi, merge_gap_blocks=gap)
+    r = run(arrs[name], lo, hi, merge_gap_blocks=gap)
     assert r.count == brute(dec[name], lo, hi)
     assert r.in_blocks + r.out_blocks + r.maybe_blocks == r.total_blocks
 
@@ -97,7 +108,7 @@ def test_gt_is_the_open_upper_range(data):
     a, arrs, _, _ = data
     t = float(np.quantile(a, 0.8))
     gt = query.query_gt(arrs["sub_t"], t)
-    rng = range_query.query_range(arrs["sub_t"], lo=t)
+    rng = query.query_range(arrs["sub_t"], t, math.inf)
     assert (gt.count, gt.maybe_blocks, gt.in_blocks) == (
         rng.count,
         rng.maybe_blocks,
@@ -108,9 +119,13 @@ def test_gt_is_the_open_upper_range(data):
 def test_below_and_at_or_above_add_up(data):
     a, arrs, dec, _ = data
     t = float(np.unique(dec["plain"])[5000])
-    below = range_query.query_range(arrs["plain"], hi=t, hi_inclusive=False).count
-    at_or_above = range_query.query_range(arrs["plain"], lo=t, lo_inclusive=True).count
+    below = query.query_lt(arrs["plain"], t).count
+    at_or_above = query.query_gt(arrs["plain"], t, inclusive=True).count
     assert below + at_or_above == a.size
+    at_or_below = query.query_lt(arrs["plain"], t, inclusive=True).count
+    above = query.query_gt(arrs["plain"], t).count
+    assert at_or_below + above == a.size
+    assert at_or_below - below == int((dec["plain"] == t).sum()) > 0
 
 
 @pytest.mark.parametrize(
@@ -177,3 +192,29 @@ def test_plan_chunks_rejects_bad_geometry():
     plan = query.native().plan_chunks
     with pytest.raises(RuntimeError):
         plan(meta, 12 + 2 * 8, (2, 1, 1), (3, 1, 1), 8, 0.0, 1, hi=1.0)
+
+
+@pytest.mark.parametrize("lo, hi", ((None, 1.0), (1.0, None), (None, None)))
+def test_range_needs_both_bounds(data, lo, hi):
+    """One-sided counts go through query_gt and query_lt instead."""
+    _, arrs, _, _ = data
+    with pytest.raises(TypeError, match="both bounds"):
+        query.query_range(arrs["plain"], lo, hi)
+    with pytest.raises(TypeError, match="both bounds"):
+        zarr.core.sync.sync(query.query_range_async(arrs["plain"], lo, hi))
+
+
+@pytest.mark.parametrize("fn", ("query_gt", "query_lt"))
+def test_one_sided_rejects_nan(data, fn):
+    _, arrs, _, _ = data
+    with pytest.raises(ValueError, match="NaN"):
+        getattr(query, fn)(arrs["plain"], math.nan)
+
+
+def test_lt_async_matches_sync(data):
+    a, arrs, _, _ = data
+    z, t = arrs["plain"], float(np.quantile(a, 0.3))
+    got = zarr.core.sync.sync(query.query_lt_async(z, t, inclusive=True))
+    assert got.count == query.query_lt(z, t, inclusive=True).count
+    with pytest.raises(TypeError, match="opened zarr.Array"):
+        zarr.core.sync.sync(query.query_lt_async("not-an-array", 0.0))
