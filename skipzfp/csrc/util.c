@@ -47,10 +47,6 @@ int szfp_calc_layout(
     size_t off_size;
     size_t hdr_size;
 
-    if (lt == NULL) {
-        return 0;
-    }
-
     if (nx == 0 || ny == 0 || nz == 0 || rate <= 0.0 || !isfinite(rate)) {
         return 0;
     }

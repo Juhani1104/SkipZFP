@@ -5,12 +5,9 @@
 #include <stdint.h>
 #include <zfp.h>
 
-/* overflow-safe size arithmetic: each returns 0 on overflow or a NULL out */
+/* overflow-safe size arithmetic: each returns 0 on overflow, and out must not be NULL
+ */
 static inline int mul_size(size_t a, size_t b, size_t* out) {
-    if (out == NULL) {
-        return 0;
-    }
-
     if (a != 0 && b > SIZE_MAX / a) {
         return 0;
     }
@@ -20,10 +17,6 @@ static inline int mul_size(size_t a, size_t b, size_t* out) {
 }
 
 static inline int add_size(size_t a, size_t b, size_t* out) {
-    if (out == NULL) {
-        return 0;
-    }
-
     if (a > SIZE_MAX - b) {
         return 0;
     }
