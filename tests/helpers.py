@@ -64,8 +64,8 @@ def decode_one_block(payload, block_id, rate):
 
 def classify(meta, lt, th):
     """Per-block states from the native planner: 1=IN, 0=OUT, 2=MAYBE."""
-    chunk_ids, block_ids, _, _ = query.native().plan(
-        meta, 1, lt.meta_size, lt.blocks_per_chunk, th, 1
+    chunk_ids, block_ids, _, _ = query.native().plan_chunks(
+        meta, lt.meta_size, (1, 1, 1), (1, 1, 1), lt.blocks_per_chunk, th, 1
     )
     states = np.full(lt.blocks_per_chunk, -1)
     states[block_ids] = 2

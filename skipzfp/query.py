@@ -23,9 +23,6 @@ from zarr.core.sync import sync
 from ._native import load_library
 from .codec import META_ATTR, meta_size
 
-# plan in chunk order in C; False keeps the older unit-order plan + numpy remap
-FUSED_PLAN = True
-
 
 class _Native:
     """ctypes bindings for the query functions in csrc/query.c."""
@@ -43,22 +40,6 @@ class _Native:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         self.lib.szfp_layout.restype = ctypes.c_int
-
-        self.lib.szfp_plan_gt.argtypes = [
-            ctypes.POINTER(ctypes.c_ubyte),
-            ctypes.c_size_t,
-            ctypes.c_size_t,
-            ctypes.c_size_t,
-            ctypes.c_double,
-            ctypes.c_int,
-            ctypes.POINTER(ctypes.c_uint32),
-            ctypes.POINTER(ctypes.c_uint32),
-            ctypes.c_size_t,
-            ctypes.POINTER(ctypes.c_size_t),
-            ctypes.POINTER(ctypes.c_size_t),
-            ctypes.POINTER(ctypes.c_size_t),
-        ]
-        self.lib.szfp_plan_gt.restype = ctypes.c_int
 
         self.lib.szfp_plan_range_chunks.argtypes = [
             ctypes.POINTER(ctypes.c_ubyte),
@@ -142,53 +123,6 @@ class _Native:
         self.check(code, "szfp_layout")
 
         return int(data_size.value), int(meta_size.value)
-
-    def plan(
-        self,
-        meta: np.ndarray,
-        n_chunk: int,
-        meta_size: int,
-        n_block: int,
-        th: float,
-        threads: int,
-    ) -> tuple[np.ndarray, np.ndarray, int, int]:
-        """Classify blocks with the older unit-order planner.
-
-        It returns the MAYBE blocks as (unit, rank) pairs, plus the IN and
-        OUT counts. :func:`unit_to_chunk` turns the pairs into chunk order.
-        """
-        src = np.ascontiguousarray(meta, dtype=np.uint8)
-        cap = n_chunk * n_block
-        chunk_ids = np.empty(cap, dtype=np.uint32)
-        block_ids = np.empty(cap, dtype=np.uint32)
-
-        n_maybe = ctypes.c_size_t()
-        n_in = ctypes.c_size_t()
-        n_out = ctypes.c_size_t()
-
-        code = self.lib.szfp_plan_gt(
-            src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
-            n_chunk,
-            meta_size,
-            n_block,
-            th,
-            threads,
-            chunk_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
-            block_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
-            cap,
-            ctypes.byref(n_maybe),
-            ctypes.byref(n_in),
-            ctypes.byref(n_out),
-        )
-        self.check(code, "szfp_plan_gt")
-
-        n = int(n_maybe.value)
-        return (
-            chunk_ids[:n].copy(),
-            block_ids[:n].copy(),
-            int(n_in.value),
-            int(n_out.value),
-        )
 
     def plan_chunks(
         self,
@@ -711,34 +645,6 @@ async def read_meta(arr: zarr.Array, lt: _Layout) -> tuple[np.ndarray, int, int]
     return data, data.nbytes, n_obj
 
 
-def unit_to_chunk(
-    lt: _Layout, unit_ids: np.ndarray, ranks: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """Turn the older planner's (unit, rank) pairs into chunk-order ids.
-
-    It is only used when FUSED_PLAN is False.
-    """
-    subs = tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape))
-    n_unit = int(np.prod(lt.unit_grid))
-    u = np.unravel_index(np.arange(n_unit), lt.unit_grid)
-    u_chunk = np.ravel_multi_index(
-        tuple(x // s for x, s in zip(u, subs)), lt.grid_shape
-    )
-    u_sub = np.ravel_multi_index(tuple(x % s for x, s in zip(u, subs)), subs)
-
-    counts = np.bincount(unit_ids, minlength=n_unit)
-    starts = np.cumsum(counts) - counts
-    u_order = np.lexsort((u_sub, u_chunk))
-    seg = counts[u_order]
-    perm = np.repeat(starts[u_order] - (np.cumsum(seg) - seg), seg) + np.arange(
-        len(unit_ids)
-    )
-
-    uid = unit_ids[perm]
-    blocks = u_sub[uid] * lt.blocks_per_unit + ranks[perm].astype(np.int64)
-    return u_chunk[uid].astype(np.uint32), blocks.astype(np.uint32)
-
-
 def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
     """Keep only one layer's error bound in each record of the zone map.
 
@@ -887,30 +793,17 @@ async def _query_async(
     # the chosen layer's error bound, so the C planner sees a single-layer
     # record that is 4 bytes per extra layer shorter.
     t1 = time.perf_counter()
-    # the older unit-order planner only handles an open upper end
-    if FUSED_PLAN or hi != math.inf:
-        chunk_ids, block_ids, n_in, n_out = await asyncio.to_thread(
-            native().plan_chunks,
-            plan_meta(meta, lt, layer),
-            lt.meta_size - 4 * (len(lt.layers) - 1),
-            lt.unit_grid,
-            tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape)),
-            lt.blocks_per_unit,
-            lo,
-            threads,
-            hi,
-        )
-    else:
-        unit_ids, ranks, n_in, n_out = await asyncio.to_thread(
-            native().plan,
-            plan_meta(meta, lt, layer),
-            int(np.prod(lt.unit_grid)),
-            lt.meta_size - 4 * (len(lt.layers) - 1),
-            lt.blocks_per_unit,
-            lo,
-            threads,
-        )
-        chunk_ids, block_ids = unit_to_chunk(lt, unit_ids, ranks)
+    chunk_ids, block_ids, n_in, n_out = await asyncio.to_thread(
+        native().plan_chunks,
+        plan_meta(meta, lt, layer),
+        lt.meta_size - 4 * (len(lt.layers) - 1),
+        lt.unit_grid,
+        tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape)),
+        lt.blocks_per_unit,
+        lo,
+        threads,
+        hi,
+    )
     plan_sec = time.perf_counter() - t1
 
     # 3. turn MAYBE blocks into byte-range reads. Each layer is stored as its

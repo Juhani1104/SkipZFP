@@ -21,7 +21,7 @@ SIGNATURES = {
     "szfp_decode": [P, SZ, SZ, SZ, SZ, DBL, INT, P, SZ],
     "szfp_meta": [P, SZ, SZ, SZ, DBL, INT, P, SZ],
     "szfp_decode_block": [P, SZ, DBL, INT, INT, P],
-    "szfp_plan_gt": [P, SZ, SZ, SZ, DBL, INT, P, P, SZ, PSZ, PSZ, PSZ],
+    "szfp_plan_gt_chunks": [P, *[SZ] * 8, DBL, INT, P, P, SZ, PSZ, PSZ, PSZ],
     "szfp_count_gt_blocks": [P, SZ, SZ, DBL, INT, DBL, INT, PSZ],
     "szfp_decode_blocks": [P, SZ, SZ, DBL, INT, INT, P],
     "szfp_merge_ranges": [P, P, SZ, SZ, P, P, P, P, PSZ],
@@ -125,8 +125,9 @@ def error_cases(buf, a):
             ERR_SIZE,
         ),
         "plan null": (
-            "szfp_plan_gt",
-            (None, 1, 0, 1, 0.0, 1, None, None, 0, _out(), _out(), _out()),
+            "szfp_plan_gt_chunks",
+            (None, 0, *[1] * 7, 0.0, 1, None, None, 0, _out(), _out(), _out()),
+            ERR_NULL,
         ),
         "count_gt null": ("szfp_count_gt_blocks", (None, 1, NB, RATE, 4, 0.0, 1, None)),
         "decode_blocks null": ("szfp_decode_blocks", (None, 1, NB, RATE, 4, 1, None)),
@@ -176,9 +177,9 @@ def edge_cases(buf, a):
     x, y, z = SHAPE
     nan, inf = float("nan"), float("inf")
 
-    def plan(n_chunk=1, size=1036, cap=512):
+    def plan(units=(1, 1, 1), size=1036, cap=512):
         # f is large enough for 512 ids, so the outputs are always valid
-        head = (ptr(meta), n_chunk, size, 512, 0.0, 1)
+        head = (ptr(meta), size, *units, 1, 1, 1, 512, 0.0, 1)
         return (*head, ptr(f), ptr(f), cap, _out(), _out(), _out())
 
     def merge(out_n=True):
@@ -232,9 +233,9 @@ def edge_cases(buf, a):
             "szfp_decode_block",
             (ptr(buf), NB, RATE, 3, 5, ptr(f)),
         ),
-        "plan zero chunks": ("szfp_plan_gt", plan(n_chunk=0, cap=0)),
-        "plan small cap": ("szfp_plan_gt", plan(cap=1)),
-        "plan wrong meta size": ("szfp_plan_gt", plan(size=1000)),
+        "plan zero chunks": ("szfp_plan_gt_chunks", plan(units=(0, 1, 1), cap=0)),
+        "plan small cap": ("szfp_plan_gt_chunks", plan(cap=1)),
+        "plan wrong meta size": ("szfp_plan_gt_chunks", plan(size=1000)),
         "count_gt bad rate": (
             "szfp_count_gt_blocks",
             (ptr(buf), 1, NB, 0.0, 4, 0.0, 1, _out()),

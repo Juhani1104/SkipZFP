@@ -94,48 +94,6 @@ int szfp_plan_range_chunks(
 );
 
 /**
- * @brief Classify every block for x > threshold with the older unit-order
- *        planner.
- *
- * It works like szfp_plan_gt_chunks(), but treats each record as its own
- * chunk, so the MAYBE blocks come out in unit order. The Python side then
- * remaps them to chunk order.
- *
- * @param[in]  meta             Zone map of all units, one record each.
- * @param[in]  n_chunk          Number of records.
- * @param[in]  meta_size        Bytes per record, which must be
- *                              12 + 2 * blocks_per_chunk.
- * @param[in]  blocks_per_chunk Blocks covered by one record.
- * @param[in]  threshold        Count values strictly greater than this.
- * @param[in]  threads          OpenMP threads, where <= 0 uses all cores.
- * @param[out] maybe_chunks     Record id of each MAYBE block.
- * @param[out] maybe_blocks     Position of each MAYBE block in its record.
- * @param[in]  maybe_cap        Length of both output arrays, which must be at
- *                              least n_chunk * blocks_per_chunk.
- * @param[out] out_maybe        Number of MAYBE blocks written.
- * @param[out] out_in           Number of IN blocks.
- * @param[out] out_out          Number of OUT blocks.
- *
- * @return 0 on success, 1 if a pointer is NULL, 2 if the sizes do not match
- *         or maybe_cap is too small, 3 if a size overflows, or 4 if scratch
- *         memory runs out.
- */
-int szfp_plan_gt(
-    const unsigned char* meta,
-    size_t n_chunk,
-    size_t meta_size,
-    size_t blocks_per_chunk,
-    double threshold,
-    int threads,
-    uint32_t* maybe_chunks,
-    uint32_t* maybe_blocks,
-    size_t maybe_cap,
-    size_t* out_maybe,
-    size_t* out_in,
-    size_t* out_out
-);
-
-/**
  * @brief Decode packed blocks and count the values greater than threshold.
  *
  * @param[in]  blocks       The block_count blocks, stored back to back.

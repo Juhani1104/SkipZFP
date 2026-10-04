@@ -55,8 +55,8 @@ def test_in_out_guarantees_hold_for_original_and_reconstruction(stored, q):
         coord = np.unravel_index(c, lt.grid_shape)
         sl = tuple(slice(ci * s, (ci + 1) * s) for ci, s in zip(coord, SHAPE))
         meta = codec.native().meta(a[sl], rate, 4)
-        _, _, n_in, n_out = query.native().plan(
-            meta, 1, lt.meta_size, lt.blocks_per_chunk, th, 1
+        _, _, n_in, n_out = query.native().plan_chunks(
+            meta, lt.meta_size, (1, 1, 1), (1, 1, 1), lt.blocks_per_chunk, th, 1
         )
         states = classify(meta, lt, th)
         assert (states == 1).sum() == n_in and (states == 0).sum() == n_out
