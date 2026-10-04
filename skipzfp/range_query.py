@@ -33,7 +33,7 @@ from .query import (
 
 
 class _RangeNative:
-    """ctypes bindings for csrc/range.c, the range versions of query._Native."""
+    """ctypes bindings for the range functions in csrc/query.c."""
 
     def __init__(self, lib: ctypes.CDLL) -> None:
         self.lib = lib
