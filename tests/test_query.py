@@ -1,5 +1,7 @@
 """query_gt counts exactly, accounts for what it reads, and reports bad input."""
 
+import os
+
 import numpy as np
 import pytest
 import zarr
@@ -110,7 +112,9 @@ def test_accounting_is_consistent(one, gap):
     beyond the MAYBE blocks.
     """
     z, rec = one
-    res = query.query_gt(z, float(np.median(rec)), merge_gap_blocks=gap)
+    res = query.query_gt(
+        z, float(np.median(rec)), options=query.QueryOptions(merge_gap_blocks=gap)
+    )
     assert res.bytes_read == res.metadata_bytes_read + res.payload_bytes_read
     assert res.range_requests == res.metadata_requests + res.payload_requests
     assert (
@@ -136,7 +140,9 @@ def test_accounting_is_consistent(one, gap):
 def test_tuning_does_not_change_count(one, kw):
     z, rec = one
     th = float(np.quantile(rec, 0.7))
-    assert query.query_gt(z, th, **kw).count == int((rec > th).sum())
+    assert query.query_gt(z, th, options=query.QueryOptions(**kw)).count == int(
+        (rec > th).sum()
+    )
 
 
 def test_query_by_path(one):
@@ -216,18 +222,34 @@ ASYNC_CALLS = {
 @pytest.mark.parametrize(
     "kw, msg",
     [
+        (dict(threads=-1), "threads"),
         (dict(request_concurrency=0), "request_concurrency"),
         (dict(request_batch_size=0), "request_batch_size"),
         (dict(merge_gap_blocks=-1), "merge_gap_blocks"),
-        (dict(layer=1), "layer must be in"),
-        (dict(layer=-1), "layer must be in"),
+        (dict(max_chunk_requests=0), "max_chunk_requests"),
     ],
 )
-@pytest.mark.parametrize("fn", ("gt", "lt", "range"))
-def test_rejects_bad_query_options(one, fn, kw, msg):
-    z, _ = one
+def test_rejects_bad_query_options(kw, msg):
     with pytest.raises(ValueError, match=msg):
-        CALLS[fn](z, **kw)
+        query.QueryOptions(**kw)
+
+
+@pytest.mark.parametrize("layer", (1, -1))
+@pytest.mark.parametrize("fn", ("gt", "lt", "range"))
+def test_rejects_layer_the_array_does_not_have(one, fn, layer):
+    z, _ = one
+    with pytest.raises(ValueError, match="layer must be in"):
+        CALLS[fn](z, options=query.QueryOptions(layer=layer))
+
+
+def test_threads_sizes_the_decode_pool(one):
+    """threads also sets the worker count of the pool that decodes layer-0 reads."""
+    z, rec = one
+    th = float(np.quantile(rec, 0.7))
+    res = query.query_gt(z, th, options=query.QueryOptions(threads=3))
+    assert res.count == int((rec > th).sum())
+    assert query.pool(3)._max_workers == 3
+    assert query.pool(0)._max_workers == (os.cpu_count() or 4)
 
 
 @pytest.mark.parametrize("fn", ("gt", "lt", "range"))

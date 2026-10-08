@@ -6,6 +6,7 @@ import ctypes
 import itertools
 import math
 import os
+import threading
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -231,17 +232,20 @@ class _Native:
 
 
 _NATIVE: _Native | None = None
-_POOL: ThreadPoolExecutor | None = None
+_POOLS: dict[int, ThreadPoolExecutor] = {}
+_POOLS_LOCK = threading.Lock()
 
 
-def pool() -> ThreadPoolExecutor:
-    """Return the shared thread pool that decodes reads as they arrive."""
-    global _POOL
+def pool(threads: int = 0) -> ThreadPoolExecutor:
+    """Return the shared pool with this many workers that decodes reads as they arrive.
 
-    if _POOL is None:
-        _POOL = ThreadPoolExecutor(os.cpu_count() or 4)
-
-    return _POOL
+    threads = 0 uses one worker per core.
+    """
+    n = threads if threads > 0 else (os.cpu_count() or 4)
+    with _POOLS_LOCK:
+        if n not in _POOLS:
+            _POOLS[n] = ThreadPoolExecutor(n)
+        return _POOLS[n]
 
 
 def native() -> _Native:
@@ -252,6 +256,53 @@ def native() -> _Native:
         _NATIVE = _Native()
 
     return _NATIVE
+
+
+@dataclass(frozen=True)
+class QueryOptions:
+    """Tuning knobs shared by query_gt, query_lt and query_range.
+
+    The defaults suit most queries, so most callers never pass this.
+
+    Attributes:
+        threads: Threads for planning and decoding, where 0 uses all cores.
+        request_concurrency: Maximum number of reads running at a time.
+        request_batch_size: Number of reads issued per batch when layer > 0,
+            4 * request_concurrency by default.
+        merge_gap_blocks: Merge two reads in the same chunk when at most this
+            many unneeded blocks lie between them, so larger values mean fewer
+            requests but more bytes read.
+        layer: Precision layer to read for arrays written with layers, where 0
+            is the lowest rate and None reads the full rate.
+        max_chunk_requests: When layer > 0, a chunk that would need more than
+            this many reads is fetched in a single read instead.
+
+    Raises:
+        ValueError: If a value is out of range.
+
+    Example:
+        >>> opts = QueryOptions(merge_gap_blocks=4000)
+        >>> query_gt("data/t2m.zarr", 295.0, options=opts)
+    """
+
+    threads: int = 0
+    request_concurrency: int = 32
+    request_batch_size: int | None = None
+    merge_gap_blocks: int = 0
+    layer: int | None = None
+    max_chunk_requests: int = 1
+
+    def __post_init__(self) -> None:
+        if self.threads < 0:
+            raise ValueError("threads must be non-negative")
+        if self.request_concurrency <= 0:
+            raise ValueError("request_concurrency must be greater than 0")
+        if self.request_batch_size is not None and self.request_batch_size <= 0:
+            raise ValueError("request_batch_size must be greater than 0")
+        if self.merge_gap_blocks < 0:
+            raise ValueError("merge_gap_blocks must be non-negative")
+        if self.max_chunk_requests <= 0:
+            raise ValueError("max_chunk_requests must be greater than 0")
 
 
 @dataclass(frozen=True)
@@ -616,6 +667,7 @@ async def stream_count(
     lo: float,
     hi: float,
     concurrency: int,
+    threads: int,
 ) -> tuple[int, int, float]:
     """Read each merged range and count lo < x <= hi as soon as it arrives.
 
@@ -636,7 +688,7 @@ async def stream_count(
         )
         rows = blocks[req.item_start : req.item_end].astype(np.int64) - req.first_block
         n, sec = await loop.run_in_executor(
-            pool(), count, data, (rows * block_size).astype(np.uint64)
+            pool(threads), count, data, (rows * block_size).astype(np.uint64)
         )
         return n, len(data), sec
 
@@ -696,13 +748,7 @@ async def _query_async(
     arr: zarr.Array,
     lo: float,
     hi: float,
-    *,
-    threads: int = 0,
-    request_concurrency: int = 32,
-    request_batch_size: int | None = None,
-    merge_gap_blocks: int = 0,
-    layer: int | None = None,
-    max_chunk_requests: int = 1,
+    options: QueryOptions | None = None,
 ) -> QueryResult:
     """Count values with lo < x <= hi. Either bound may be infinite.
 
@@ -711,17 +757,13 @@ async def _query_async(
     if not isinstance(arr, zarr.Array):
         raise TypeError("the query expects an opened zarr.Array")
 
-    if request_concurrency <= 0:
-        raise ValueError("request_concurrency must be greater than 0")
-    if request_batch_size is None:
-        request_batch_size = max(request_concurrency, request_concurrency * 4)
-    if request_batch_size <= 0:
-        raise ValueError("request_batch_size must be greater than 0")
+    opts = options or QueryOptions()
+    batch_size = opts.request_batch_size or 4 * opts.request_concurrency
 
     t0 = time.perf_counter()
 
     lt = get_layout(arr)
-    layer = len(lt.layers) - 1 if layer is None else layer
+    layer = len(lt.layers) - 1 if opts.layer is None else opts.layer
     if not 0 <= layer < len(lt.layers):
         raise ValueError(f"layer must be in [0, {len(lt.layers) - 1}]")
     rate = lt.layers[layer]
@@ -748,7 +790,7 @@ async def _query_async(
         tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape)),
         lt.blocks_per_unit,
         lo,
-        threads,
+        opts.threads,
         hi,
     )
     plan_sec = time.perf_counter() - t1
@@ -762,7 +804,7 @@ async def _query_async(
             chunk_ids,
             block_ids,
             lt.layer_bytes[j],
-            merge_gap_blocks,
+            opts.merge_gap_blocks,
             lt.layer_starts[j],
         )
         for j in range(layer + 1)
@@ -778,7 +820,7 @@ async def _query_async(
         per_key = collections.Counter(
             req.key for merged, _ in per_layer for req in merged
         )
-        dense = {k for k, n in per_key.items() if n > max_chunk_requests}
+        dense = {k for k, n in per_key.items() if n > opts.max_chunk_requests}
     prefix_end = int(cols[-1]) * lt.blocks_per_chunk
 
     # 4. read and decode the MAYBE blocks.
@@ -799,7 +841,8 @@ async def _query_async(
             lt.block_dim,
             lo,
             hi,
-            request_concurrency,
+            opts.request_concurrency,
+            opts.threads,
         )
         payload_read_sec = time.perf_counter() - t1
         n_payload_reqs = len(merged0)
@@ -825,8 +868,8 @@ async def _query_async(
         payload_parts = await read_ranges(
             store,
             payload_reqs,
-            concurrency=request_concurrency,
-            batch_size=request_batch_size,
+            concurrency=opts.request_concurrency,
+            batch_size=batch_size,
         )
         payload_read_sec = time.perf_counter() - t1
 
@@ -866,7 +909,7 @@ async def _query_async(
             rate,
             lt.block_dim,
             lo,
-            threads,
+            opts.threads,
             hi,
         )
         decode_sec = time.perf_counter() - t1
@@ -904,11 +947,11 @@ def _run(
     hi: float,
     array_path: str,
     storage_options: Mapping[str, Any] | None,
-    **kwargs: Any,
+    options: QueryOptions | None,
 ) -> QueryResult:
     """Open source and count lo < x <= hi on it."""
     arr = open_skipzfp(source, array_path=array_path, storage_options=storage_options)
-    return sync(_query_async(arr, lo, hi, **kwargs))
+    return sync(_query_async(arr, lo, hi, options))
 
 
 def _below_f32(x: float) -> float:
@@ -964,12 +1007,7 @@ async def query_gt_async(
     threshold: float,
     *,
     inclusive: bool = False,
-    threads: int = 0,
-    request_concurrency: int = 32,
-    request_batch_size: int | None = None,
-    merge_gap_blocks: int = 0,
-    layer: int | None = None,
-    max_chunk_requests: int = 1,
+    options: QueryOptions | None = None,
 ) -> QueryResult:
     """Async version of :func:`query_gt` for an already opened array.
 
@@ -987,12 +1025,7 @@ async def query_gt_async(
         arr,
         lo,
         hi,
-        threads=threads,
-        request_concurrency=request_concurrency,
-        request_batch_size=request_batch_size,
-        merge_gap_blocks=merge_gap_blocks,
-        layer=layer,
-        max_chunk_requests=max_chunk_requests,
+        options,
     )
 
 
@@ -1003,12 +1036,7 @@ def query_gt(
     inclusive: bool = False,
     array_path: str = "",
     storage_options: Mapping[str, Any] | None = None,
-    threads: int = 0,
-    request_concurrency: int = 32,
-    request_batch_size: int | None = None,
-    merge_gap_blocks: int = 0,
-    layer: int | None = None,
-    max_chunk_requests: int = 1,
+    options: QueryOptions | None = None,
 ) -> QueryResult:
     """Count values greater than threshold in a SkipZFP array.
 
@@ -1028,18 +1056,8 @@ def query_gt(
             not an opened array.
         storage_options: Options for a cloud store, such as credentials,
             passed to fsspec when source is a URL.
-        threads: C threads for planning, and for decoding when layer > 0,
-            where 0 uses all cores.
-        request_concurrency: Maximum number of reads running at a time.
-        request_batch_size: Number of reads issued per batch when
-            layer > 0, 4 * request_concurrency by default.
-        merge_gap_blocks: Merge two reads in the same chunk when at most
-            this many unneeded blocks lie between them, so larger values
-            mean fewer requests but more bytes read.
-        layer: Precision layer to read for arrays written with layers,
-            where 0 is the lowest rate and None reads the full rate.
-        max_chunk_requests: When layer > 0, a chunk that would need more
-            than this many reads is fetched in a single read instead.
+        options: Tuning knobs such as threads and read merging, see
+            :class:`QueryOptions`. The defaults suit most queries.
 
     Returns:
         QueryResult with the count, the number of IN, OUT and MAYBE blocks,
@@ -1048,7 +1066,7 @@ def query_gt(
     Raises:
         ValueError: If threshold is NaN, the array's shape or chunking is not
             supported, it does not use the skipzfp codec, it has no zone map (see
-            :func:`write_meta`), or an argument is out of range.
+            :func:`write_meta`), or options.layer is out of range.
         RuntimeError: If source is a URL and its fsspec backend is missing.
         FileNotFoundError: If a chunk the query needs is missing.
 
@@ -1064,12 +1082,7 @@ def query_gt(
         hi,
         array_path,
         storage_options,
-        threads=threads,
-        request_concurrency=request_concurrency,
-        request_batch_size=request_batch_size,
-        merge_gap_blocks=merge_gap_blocks,
-        layer=layer,
-        max_chunk_requests=max_chunk_requests,
+        options,
     )
 
 
@@ -1078,12 +1091,7 @@ async def query_lt_async(
     threshold: float,
     *,
     inclusive: bool = False,
-    threads: int = 0,
-    request_concurrency: int = 32,
-    request_batch_size: int | None = None,
-    merge_gap_blocks: int = 0,
-    layer: int | None = None,
-    max_chunk_requests: int = 1,
+    options: QueryOptions | None = None,
 ) -> QueryResult:
     """Async version of :func:`query_lt` for an already opened array.
 
@@ -1101,12 +1109,7 @@ async def query_lt_async(
         arr,
         lo,
         hi,
-        threads=threads,
-        request_concurrency=request_concurrency,
-        request_batch_size=request_batch_size,
-        merge_gap_blocks=merge_gap_blocks,
-        layer=layer,
-        max_chunk_requests=max_chunk_requests,
+        options,
     )
 
 
@@ -1117,12 +1120,7 @@ def query_lt(
     inclusive: bool = False,
     array_path: str = "",
     storage_options: Mapping[str, Any] | None = None,
-    threads: int = 0,
-    request_concurrency: int = 32,
-    request_batch_size: int | None = None,
-    merge_gap_blocks: int = 0,
-    layer: int | None = None,
-    max_chunk_requests: int = 1,
+    options: QueryOptions | None = None,
 ) -> QueryResult:
     """Count values less than threshold in a SkipZFP array.
 
@@ -1132,9 +1130,7 @@ def query_lt(
         source: An opened zarr.Array, or a local path or URL to open.
         threshold: Count values strictly less than this.
         inclusive: Use x <= threshold instead of x < threshold.
-        array_path, storage_options, threads, request_concurrency,
-        request_batch_size, merge_gap_blocks, layer, max_chunk_requests:
-            Same as in :func:`query_gt`.
+        array_path, storage_options, options: Same as in :func:`query_gt`.
 
     Returns:
         QueryResult, as in :func:`query_gt`.
@@ -1152,12 +1148,7 @@ def query_lt(
         hi,
         array_path,
         storage_options,
-        threads=threads,
-        request_concurrency=request_concurrency,
-        request_batch_size=request_batch_size,
-        merge_gap_blocks=merge_gap_blocks,
-        layer=layer,
-        max_chunk_requests=max_chunk_requests,
+        options,
     )
 
 
@@ -1168,12 +1159,7 @@ async def query_range_async(
     *,
     lo_inclusive: bool = False,
     hi_inclusive: bool = True,
-    threads: int = 0,
-    request_concurrency: int = 32,
-    request_batch_size: int | None = None,
-    merge_gap_blocks: int = 0,
-    layer: int | None = None,
-    max_chunk_requests: int = 1,
+    options: QueryOptions | None = None,
 ) -> QueryResult:
     """Async version of :func:`query_range` for an already opened array.
 
@@ -1193,12 +1179,7 @@ async def query_range_async(
         arr,
         a,
         b,
-        threads=threads,
-        request_concurrency=request_concurrency,
-        request_batch_size=request_batch_size,
-        merge_gap_blocks=merge_gap_blocks,
-        layer=layer,
-        max_chunk_requests=max_chunk_requests,
+        options,
     )
 
 
@@ -1211,12 +1192,7 @@ def query_range(
     hi_inclusive: bool = True,
     array_path: str = "",
     storage_options: Mapping[str, Any] | None = None,
-    threads: int = 0,
-    request_concurrency: int = 32,
-    request_batch_size: int | None = None,
-    merge_gap_blocks: int = 0,
-    layer: int | None = None,
-    max_chunk_requests: int = 1,
+    options: QueryOptions | None = None,
 ) -> QueryResult:
     """Count values between two bounds, by default lo < x <= hi.
 
@@ -1235,9 +1211,7 @@ def query_range(
         hi: Upper bound.
         lo_inclusive: Use lo <= x instead of lo < x.
         hi_inclusive: Use x <= hi, or x < hi when False.
-        array_path, storage_options, threads, request_concurrency,
-        request_batch_size, merge_gap_blocks, layer, max_chunk_requests:
-            Same as in :func:`query_gt`.
+        array_path, storage_options, options: Same as in :func:`query_gt`.
 
     Returns:
         QueryResult, as in :func:`query_gt`.
@@ -1261,10 +1235,5 @@ def query_range(
         b,
         array_path,
         storage_options,
-        threads=threads,
-        request_concurrency=request_concurrency,
-        request_batch_size=request_batch_size,
-        merge_gap_blocks=merge_gap_blocks,
-        layer=layer,
-        max_chunk_requests=max_chunk_requests,
+        options,
     )

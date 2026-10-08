@@ -1,10 +1,18 @@
 """SkipZFP: ZFP compression for Zarr with a zone map that lets queries skip blocks."""
 
 from .codec import SkipZFPCodec, write_meta
-from .query import QueryResult, open_skipzfp, query_gt, query_lt, query_range
+from .query import (
+    QueryOptions,
+    QueryResult,
+    open_skipzfp,
+    query_gt,
+    query_lt,
+    query_range,
+)
 
 __all__ = [
     "SkipZFPCodec",
+    "QueryOptions",
     "QueryResult",
     "open_skipzfp",
     "query_gt",

@@ -15,6 +15,7 @@ from zarr.core.common import JSON
 
 from ._native import check, load_library
 
+
 class _Native:
     """ctypes bindings for the codec functions in csrc/core.c."""
 

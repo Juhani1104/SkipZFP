@@ -68,7 +68,7 @@ def run(z, lo, hi, **kw):
 def test_range_matches_brute_force(data, name, k, gap):
     a, arrs, dec, _ = data
     lo, hi = bounds(a)[k]
-    r = run(arrs[name], lo, hi, merge_gap_blocks=gap)
+    r = run(arrs[name], lo, hi, options=query.QueryOptions(merge_gap_blocks=gap))
     assert r.count == brute(dec[name], lo, hi)
     assert r.in_blocks + r.out_blocks + r.maybe_blocks == r.total_blocks
 
@@ -99,7 +99,12 @@ def test_range_on_each_layer(data, k, max_req):
     a, arrs, _, plain = data
     lo, hi = float(np.quantile(a, 0.25)), float(np.quantile(a, 0.6))
     r = query.query_range(
-        arrs["layers"], lo, hi, layer=k, merge_gap_blocks=4, max_chunk_requests=max_req
+        arrs["layers"],
+        lo,
+        hi,
+        options=query.QueryOptions(
+            layer=k, merge_gap_blocks=4, max_chunk_requests=max_req
+        ),
     )
     assert r.count == brute(plain[LAYERS[k]], lo, hi)
 

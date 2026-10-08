@@ -55,6 +55,10 @@ def test_layered_query_matches_plain_rate(layered, order, k, q, max_req):
     a, ref, arrs = layered
     th = float(np.quantile(a, 1 - q))
     res = query.query_gt(
-        arrs[order], th, layer=k, merge_gap_blocks=4, max_chunk_requests=max_req
+        arrs[order],
+        th,
+        options=query.QueryOptions(
+            layer=k, merge_gap_blocks=4, max_chunk_requests=max_req
+        ),
     )
     assert res.count == int((ref[LAYERS[k]].astype(np.float64) > th).sum())

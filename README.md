@@ -92,7 +92,9 @@ print(r.count, r.maybe_blocks)
 experiments read from Google Cloud Storage) or a path, and the result also reports
 bytes, requests and time per stage. `query_gt` and `query_lt` take `inclusive=True` for
 `>=` and `<=`; `query_range` counts `lo < x <= hi` by default, and `lo_inclusive` and
-`hi_inclusive` switch either end.
+`hi_inclusive` switch either end. Tuning knobs such as threads, read concurrency and
+the merging of nearby reads go in a `QueryOptions` passed as `options=`; the defaults
+suit most queries.
 
 ## How it works
 
