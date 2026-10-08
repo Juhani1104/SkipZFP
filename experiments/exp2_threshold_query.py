@@ -58,8 +58,10 @@ def one(url, method, th):
         r = query.query_gt(
             arr,
             th,
-            request_concurrency=CONCURRENCY,
-            merge_gap_blocks=SKIPZFP_GAP_BYTES // 64,
+            options=query.QueryOptions(
+                request_concurrency=CONCURRENCY,
+                merge_gap_blocks=SKIPZFP_GAP_BYTES // 64,
+            ),
         )
         out = dict(
             seconds=r.total_seconds,

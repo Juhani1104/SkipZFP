@@ -16,15 +16,6 @@
 #include <omp.h>
 #endif
 
-enum {
-    SZFP_OK = 0,
-    SZFP_ERR_NULL = 1,
-    SZFP_ERR_ARG = 2,
-    SZFP_ERR_SIZE = 3,
-    SZFP_ERR_MALLOC = 4,
-    SZFP_ERR_ZFP = 5
-};
-
 /* the value predicate of a range query: lo < v <= hi */
 static inline int in_range(float v, double lo, double hi) {
     double d = (double)v;
@@ -91,27 +82,27 @@ static int decode_block(
     size_t ret;
 
     if (src == NULL || out == NULL) {
-        return SZFP_ERR_NULL;
+        return SZ_ERR_NULL;
     }
 
     if (src_size == 0 || block_dim <= 0 || rate <= 0.0 || !isfinite(rate)) {
-        return SZFP_ERR_ARG;
+        return SZ_ERR_ARG;
     }
 
     if (szfp_fast_ok(block_dim, rate, src_size)) {
         szfp_fast_decode(src, src_size, out);
-        return SZFP_OK;
+        return SZ_OK;
     }
 
     stream = stream_open((void*)src, src_size);
     if (stream == NULL) {
-        return SZFP_ERR_ZFP;
+        return SZ_ERR_ZFP;
     }
 
     zfp = zfp_stream_open(stream);
     if (zfp == NULL) {
         stream_close(stream);
-        return SZFP_ERR_ZFP;
+        return SZ_ERR_ZFP;
     }
 
     zfp_stream_set_rate(zfp, rate, zfp_type_float, 3, 0);
@@ -124,7 +115,7 @@ static int decode_block(
     if (field == NULL) {
         zfp_stream_close(zfp);
         stream_close(stream);
-        return SZFP_ERR_ZFP;
+        return SZ_ERR_ZFP;
     }
 
     ret = zfp_decompress(zfp, field);
@@ -133,7 +124,7 @@ static int decode_block(
     zfp_stream_close(zfp);
     stream_close(stream);
 
-    return ret == 0 ? SZFP_ERR_ZFP : SZFP_OK;
+    return ret == 0 ? SZ_ERR_ZFP : SZ_OK;
 }
 
 /* classify the blocks of one metadata unit for lo < x <= hi:
@@ -218,7 +209,7 @@ int szfp_plan_range_chunks(
 
     if (meta == NULL || maybe_chunks == NULL || maybe_blocks == NULL ||
         out_maybe == NULL || out_in == NULL || out_out == NULL) {
-        return SZFP_ERR_NULL;
+        return SZ_ERR_NULL;
     }
 
     *out_maybe = 0;
@@ -228,7 +219,7 @@ int szfp_plan_range_chunks(
     if (sx == 0 || sy == 0 || sz == 0 || ux % sx || uy % sy || uz % sz ||
         blocks_per_unit == 0 ||
         meta_size != 3u * sizeof(float) + 2u * blocks_per_unit) {
-        return SZFP_ERR_ARG;
+        return SZ_ERR_ARG;
     }
 
     gx = ux / sx;
@@ -241,7 +232,7 @@ int szfp_plan_range_chunks(
         !mul_size(n_chunk, blocks_per_chunk, &total_blocks) ||
         maybe_cap < total_blocks || blocks_per_chunk > UINT32_MAX ||
         n_chunk > UINT32_MAX) {
-        return SZFP_ERR_ARG;
+        return SZ_ERR_ARG;
     }
 
     states = (unsigned char*)malloc(total_blocks);
@@ -249,7 +240,7 @@ int szfp_plan_range_chunks(
     if (states == NULL || n_maybe_chunk == NULL) {
         free(states);
         free(n_maybe_chunk);
-        return SZFP_ERR_MALLOC;
+        return SZ_ERR_MALLOC;
     }
 
     workers = threads > 0 ? threads : 1;
@@ -317,7 +308,7 @@ int szfp_plan_range_chunks(
 
     free(states);
     free(n_maybe_chunk);
-    return SZFP_OK;
+    return SZ_OK;
 }
 
 /* x > threshold is the range threshold < x <= +inf */
@@ -383,25 +374,25 @@ int szfp_count_range_blocks(
     int workers;
 
     if (out_count == NULL) {
-        return SZFP_ERR_NULL;
+        return SZ_ERR_NULL;
     }
 
     *out_count = 0;
 
     if (block_count == 0) {
-        return SZFP_OK;
+        return SZ_OK;
     }
 
     if (blocks == NULL) {
-        return SZFP_ERR_NULL;
+        return SZ_ERR_NULL;
     }
 
     if (!block_layout(block_dim, rate, &nval, &need_bytes)) {
-        return SZFP_ERR_ARG;
+        return SZ_ERR_ARG;
     }
 
     if (block_nbytes != need_bytes) {
-        return SZFP_ERR_SIZE;
+        return SZ_ERR_SIZE;
     }
 
     workers = threads > 0 ? threads : 1;
@@ -414,12 +405,12 @@ int szfp_count_range_blocks(
 
     if (workers <= 0 || !mul_size((size_t)workers, nval, &scratch_vals) ||
         !mul_size(scratch_vals, sizeof(float), &scratch_bytes)) {
-        return SZFP_ERR_SIZE;
+        return SZ_ERR_SIZE;
     }
 
     scratch = (float*)malloc(scratch_bytes);
     if (scratch == NULL) {
-        return SZFP_ERR_MALLOC;
+        return SZ_ERR_MALLOC;
     }
 
     count = 0;
@@ -450,7 +441,7 @@ int szfp_count_range_blocks(
             blocks + bid * block_nbytes, block_nbytes, rate, block_dim, vals
         );
 
-        if (code != SZFP_OK) {
+        if (code != SZ_OK) {
             failed = 1;
             continue;
         }
@@ -463,11 +454,11 @@ int szfp_count_range_blocks(
     free(scratch);
 
     if (failed) {
-        return SZFP_ERR_ZFP;
+        return SZ_ERR_ZFP;
     }
 
     *out_count = count;
-    return SZFP_OK;
+    return SZ_OK;
 }
 
 int szfp_count_gt_blocks(
@@ -507,19 +498,19 @@ int szfp_decode_blocks(
     int workers;
 
     if (block_count == 0) {
-        return SZFP_OK;
+        return SZ_OK;
     }
 
     if (blocks == NULL || out == NULL) {
-        return SZFP_ERR_NULL;
+        return SZ_ERR_NULL;
     }
 
     if (!block_layout(block_dim, rate, &nval, &need_bytes)) {
-        return SZFP_ERR_ARG;
+        return SZ_ERR_ARG;
     }
 
     if (block_nbytes != need_bytes) {
-        return SZFP_ERR_SIZE;
+        return SZ_ERR_SIZE;
     }
 
     workers = threads > 0 ? threads : 1;
@@ -538,12 +529,12 @@ int szfp_decode_blocks(
                 rate,
                 block_dim,
                 out + bid * nval
-            ) != SZFP_OK) {
+            ) != SZ_OK) {
             failed = 1;
         }
     }
 
-    return failed ? SZFP_ERR_ZFP : SZFP_OK;
+    return failed ? SZ_ERR_ZFP : SZ_OK;
 }
 
 int szfp_merge_ranges(
@@ -560,18 +551,18 @@ int szfp_merge_ranges(
     size_t m = 0;
 
     if (out_n == NULL) {
-        return SZFP_ERR_NULL;
+        return SZ_ERR_NULL;
     }
 
     *out_n = 0;
 
     if (n == 0) {
-        return SZFP_OK;
+        return SZ_OK;
     }
 
     if (chunk_ids == NULL || block_ids == NULL || out_chunk == NULL ||
         out_first == NULL || out_last == NULL || out_item_start == NULL) {
-        return SZFP_ERR_NULL;
+        return SZ_ERR_NULL;
     }
 
     out_chunk[0] = chunk_ids[0];
@@ -582,7 +573,7 @@ int szfp_merge_ranges(
     for (size_t i = 1; i < n; i++) {
         if (chunk_ids[i] < chunk_ids[i - 1] ||
             (chunk_ids[i] == chunk_ids[i - 1] && block_ids[i] <= block_ids[i - 1])) {
-            return SZFP_ERR_ARG;
+            return SZ_ERR_ARG;
         }
 
         if (chunk_ids[i] == out_chunk[m] &&
@@ -599,7 +590,7 @@ int szfp_merge_ranges(
     }
 
     *out_n = m + 1;
-    return SZFP_OK;
+    return SZ_OK;
 }
 
 int szfp_count_offsets_range(
@@ -620,34 +611,34 @@ int szfp_count_offsets_range(
     float vals[64];
 
     if (out_count == NULL) {
-        return SZFP_ERR_NULL;
+        return SZ_ERR_NULL;
     }
 
     *out_count = 0;
 
     if (n == 0) {
-        return SZFP_OK;
+        return SZ_OK;
     }
 
     if (buf == NULL || offsets == NULL) {
-        return SZFP_ERR_NULL;
+        return SZ_ERR_NULL;
     }
 
     if (!block_layout(block_dim, rate, &nval, &need_bytes) || nval > 64) {
-        return SZFP_ERR_ARG;
+        return SZ_ERR_ARG;
     }
 
     if (block_nbytes != need_bytes) {
-        return SZFP_ERR_SIZE;
+        return SZ_ERR_SIZE;
     }
 
     if (block_dim != 4) {
-        return SZFP_ERR_ARG;
+        return SZ_ERR_ARG;
     }
 
     for (size_t i = 0; i < n; i++) {
         if (offsets[i] > buf_size || buf_size - offsets[i] < block_nbytes) {
-            return SZFP_ERR_SIZE;
+            return SZ_ERR_SIZE;
         }
     }
 
@@ -662,13 +653,13 @@ int szfp_count_offsets_range(
         zfp_stream* zfp;
 
         if (stream == NULL) {
-            return SZFP_ERR_ZFP;
+            return SZ_ERR_ZFP;
         }
 
         zfp = zfp_stream_open(stream);
         if (zfp == NULL) {
             stream_close(stream);
-            return SZFP_ERR_ZFP;
+            return SZ_ERR_ZFP;
         }
 
         zfp_stream_set_rate(zfp, rate, zfp_type_float, 3, 0);
@@ -685,7 +676,7 @@ int szfp_count_offsets_range(
     }
 
     *out_count = count;
-    return SZFP_OK;
+    return SZ_OK;
 }
 
 int szfp_count_offsets(

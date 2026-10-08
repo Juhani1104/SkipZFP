@@ -27,7 +27,7 @@ SIGNATURES = {
     "szfp_merge_ranges": [P, P, SZ, SZ, P, P, P, P, PSZ],
     "szfp_count_offsets": [P, SZ, P, SZ, SZ, DBL, INT, DBL, PSZ],
 }
-OK, ERR_NULL, ERR_ARG, ERR_SIZE = 0, 1, 7, 8
+OK, ERR_NULL, ERR_ARG, ERR_SIZE = 0, 1, 7, 8  # SzResult in csrc/util.h
 RATE = 8.0
 NB = int(64 * RATE / 8)
 

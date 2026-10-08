@@ -57,6 +57,10 @@ def test_sub_chunk_query_matches_small_chunks(subbed, case, q, gap, max_req):
     for k in range(n_layer):
         r = LAYERS[k] if n_layer > 1 else 8.0
         res = query.query_gt(
-            arrs[case], th, layer=k, merge_gap_blocks=gap, max_chunk_requests=max_req
+            arrs[case],
+            th,
+            options=query.QueryOptions(
+                layer=k, merge_gap_blocks=gap, max_chunk_requests=max_req
+            ),
         )
         assert res.count == int((ref[r].astype(np.float64) > th).sum())
