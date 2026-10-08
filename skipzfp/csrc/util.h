@@ -5,6 +5,21 @@
 #include <stdint.h>
 #include <zfp.h>
 
+/** Result codes returned by every C function in the library (core.h, query.h). */
+typedef enum {
+    SZ_OK = 0,
+    SZ_ERR_NULL = 1,       /**< a required pointer is NULL */
+    SZ_ERR_STREAM = 2,     /**< ZFP could not open a bit stream */
+    SZ_ERR_ZFP = 3,        /**< ZFP could not open a compression stream */
+    SZ_ERR_FIELD = 4,      /**< ZFP could not create a field for the array */
+    SZ_ERR_DECOMPRESS = 5, /**< ZFP decompression failed */
+    SZ_ERR_DIMS = 6,       /**< unsupported number of dimensions */
+    SZ_ERR_ARG = 7,        /**< invalid shape, rate or block size */
+    SZ_ERR_SIZE = 8,       /**< a buffer has the wrong size or a size overflows */
+    SZ_ERR_COMPRESS = 9,   /**< ZFP compression failed */
+    SZ_ERR_MALLOC = 10     /**< out of memory */
+} SzResult;
+
 /* overflow-safe size arithmetic: each returns 0 on overflow, and out must not be NULL
  */
 static inline int mul_size(size_t a, size_t b, size_t* out) {

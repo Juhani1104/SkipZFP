@@ -13,22 +13,7 @@ from zarr.core.array_spec import ArraySpec
 from zarr.core.buffer import Buffer, NDBuffer
 from zarr.core.common import JSON
 
-from ._native import load_library
-
-_ERR = {
-    0: "SZ_OK",
-    1: "SZ_ERR_NULL",
-    2: "SZ_ERR_STREAM",
-    3: "SZ_ERR_ZFP",
-    4: "SZ_ERR_FIELD",
-    5: "SZ_ERR_DECOMPRESS",
-    6: "SZ_ERR_DIMS",
-    7: "SZ_ERR_ARG",
-    8: "SZ_ERR_SIZE",
-    9: "SZ_ERR_COMPRESS",
-    10: "SZ_ERR_MALLOC",
-}
-
+from ._native import check, load_library
 
 class _Native:
     """ctypes bindings for the codec functions in csrc/core.c."""
@@ -85,12 +70,6 @@ class _Native:
         ]
         self.lib.szfp_meta.restype = ctypes.c_int
 
-    @staticmethod
-    def check(code: int, name: str) -> None:
-        if code != 0:
-            msg = _ERR.get(code, f"unknown error {code}")
-            raise RuntimeError(f"{name} failed: {msg}")
-
     def layout(
         self,
         shape: tuple[int, int, int],
@@ -110,7 +89,7 @@ class _Native:
             ctypes.byref(data_size),
             ctypes.byref(meta_size),
         )
-        self.check(code, "szfp_layout")
+        check(code, "szfp_layout")
         return int(data_size.value), int(meta_size.value)
 
     def encode(
@@ -141,7 +120,7 @@ class _Native:
             out.size,
             ctypes.byref(n),
         )
-        self.check(code, "szfp_encode")
+        check(code, "szfp_encode")
 
         if int(n.value) != cap:
             raise RuntimeError(
@@ -173,7 +152,7 @@ class _Native:
             out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
             out.size,
         )
-        self.check(code, "szfp_decode")
+        check(code, "szfp_decode")
 
         return out
 
@@ -199,7 +178,7 @@ class _Native:
             out.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             out.size,
         )
-        self.check(code, "szfp_meta")
+        check(code, "szfp_meta")
 
         return out
 

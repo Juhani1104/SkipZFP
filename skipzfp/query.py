@@ -20,7 +20,7 @@ from zarr.abc.store import RangeByteRequest
 from zarr.core.buffer import default_buffer_prototype
 from zarr.core.sync import sync
 
-from ._native import load_library
+from ._native import check, load_library
 from .codec import META_ATTR, find_codec, meta_size
 from .codec import native as codec_native
 
@@ -86,11 +86,6 @@ class _Native:
         ]
         self.lib.szfp_count_offsets_range.restype = ctypes.c_int
 
-    @staticmethod
-    def check(code: int, name: str) -> None:
-        if code != 0:
-            raise RuntimeError(f"{name} failed: {code}")
-
     def plan_chunks(
         self,
         meta: np.ndarray,
@@ -132,7 +127,7 @@ class _Native:
             ctypes.byref(n_in),
             ctypes.byref(n_out),
         )
-        self.check(code, "szfp_plan_range_chunks")
+        check(code, "szfp_plan_range_chunks")
 
         n = int(n_maybe.value)
         return chunk_ids[:n], block_ids[:n], int(n_in.value), int(n_out.value)
@@ -166,7 +161,7 @@ class _Native:
             threads,
             ctypes.byref(out),
         )
-        self.check(code, "szfp_count_range_blocks")
+        check(code, "szfp_count_range_blocks")
         return int(out.value)
 
     def merge(
@@ -201,7 +196,7 @@ class _Native:
             out_item.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
             ctypes.byref(m),
         )
-        self.check(code, "szfp_merge_ranges")
+        check(code, "szfp_merge_ranges")
         k = int(m.value)
         return out_chunk[:k], out_first[:k], out_last[:k], out_item[:k]
 
@@ -231,7 +226,7 @@ class _Native:
             hi,
             ctypes.byref(out),
         )
-        self.check(code, "szfp_count_offsets_range")
+        check(code, "szfp_count_offsets_range")
         return int(out.value)
 
 

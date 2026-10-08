@@ -26,7 +26,7 @@ SIGNATURES = {
     "szfp_set_fast_decode": [INT],
 }
 # codes from csrc/query.c, which differ from the SZ_* codes in core.h
-OK, ERR_NULL, ERR_ARG, ERR_SIZE = 0, 1, 2, 3
+OK, ERR_NULL, ERR_ARG, ERR_SIZE = 0, 1, 7, 8  # SzResult in csrc/util.h
 LIBZFP, FAST, FAST_SCALAR = 0, 1, 2
 RATE = 8.0
 NB = int(64 * RATE / 8)

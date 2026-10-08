@@ -43,8 +43,8 @@
  * @param[out] out_in          Number of IN blocks.
  * @param[out] out_out         Number of OUT blocks.
  *
- * @return 0 on success, 1 if a pointer is NULL, 2 if the sizes do not match
- *         or maybe_cap is too small, or 4 if scratch memory runs out.
+ * @return SZ_OK on success, SZ_ERR_NULL if a pointer is NULL, SZ_ERR_ARG if the sizes
+ * do not match or maybe_cap is too small, or SZ_ERR_MALLOC if scratch memory runs out.
  */
 int szfp_plan_gt_chunks(
     const unsigned char* meta,
@@ -106,9 +106,9 @@ int szfp_plan_range_chunks(
  * @param[in]  threads      OpenMP threads, where <= 0 uses all cores.
  * @param[out] out_count    Number of matching values.
  *
- * @return 0 on success, 1 if a pointer is NULL, 2 if rate or block_dim is
- *         invalid, 3 if block_nbytes does not match, 4 if scratch memory runs
- *         out, or 5 if a block fails to decode.
+ * @return SZ_OK on success, SZ_ERR_NULL if a pointer is NULL, SZ_ERR_ARG if rate or
+ * block_dim is invalid, SZ_ERR_SIZE if block_nbytes does not match, SZ_ERR_MALLOC if
+ * scratch memory runs out, or SZ_ERR_ZFP if a block fails to decode.
  */
 int szfp_count_gt_blocks(
     const unsigned char* blocks,
@@ -151,9 +151,9 @@ int szfp_count_range_blocks(
  * @param[out] out          Buffer that receives block_dim^3 values per block,
  *                          block after block.
  *
- * @return 0 on success, 1 if a pointer is NULL, 2 if rate or block_dim is
- *         invalid, 3 if block_nbytes does not match, or 5 if a block fails to
- *         decode.
+ * @return SZ_OK on success, SZ_ERR_NULL if a pointer is NULL, SZ_ERR_ARG if rate or
+ * block_dim is invalid, SZ_ERR_SIZE if block_nbytes does not match, or SZ_ERR_ZFP if a
+ * block fails to decode.
  */
 int szfp_decode_blocks(
     const unsigned char* blocks,
@@ -182,8 +182,8 @@ int szfp_decode_blocks(
  * @param[out] out_item_start Index in the input of each run's first id.
  * @param[out] out_n          Number of runs.
  *
- * @return 0 on success, 1 if a pointer is NULL, or 2 if the ids are not
- *         strictly increasing.
+ * @return SZ_OK on success, SZ_ERR_NULL if a pointer is NULL, or SZ_ERR_ARG if the ids
+ * are not strictly increasing.
  */
 int szfp_merge_ranges(
     const uint32_t* chunk_ids,
@@ -214,9 +214,9 @@ int szfp_merge_ranges(
  * @param[in]  threshold    Count values strictly greater than this.
  * @param[out] out_count    Number of matching values.
  *
- * @return 0 on success, 1 if a pointer is NULL, 2 if rate or block_dim is
- *         invalid, 3 if block_nbytes does not match or a block runs past the
- *         end of buf, or 5 if ZFP cannot open a stream.
+ * @return SZ_OK on success, SZ_ERR_NULL if a pointer is NULL, SZ_ERR_ARG if rate or
+ * block_dim is invalid, SZ_ERR_SIZE if block_nbytes does not match or a block runs past
+ * the end of buf, or SZ_ERR_ZFP if ZFP cannot open a stream.
  */
 int szfp_count_offsets(
     const unsigned char* buf,
