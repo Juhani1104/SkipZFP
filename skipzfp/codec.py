@@ -496,6 +496,9 @@ def meta_size(codec: SkipZFPCodec, chunk: tuple[int, ...]) -> int:
 
 
 META_ATTR = "skipzfp_meta"
+# units along the first axis in each zone map object, so a query can compute the
+# object keys and sizes without opening the zone map's zarr.json
+META_T_CHUNK_ATTR = "skipzfp_meta_t_chunk"
 
 
 def find_codec(arr: zarr.Array) -> SkipZFPCodec:
@@ -528,7 +531,8 @@ def write_meta(
     they also hold for the decoded values.
 
     The zone map is saved as a uint8 array next to arr, replacing any
-    existing one at the same path, and arr's attributes point to it.
+    existing one at the same path, and arr's attributes record its path and
+    t_chunk so a query can read it without opening it as an array.
 
     Args:
         arr: An array written with SkipZFPCodec, inside a group.
@@ -561,15 +565,21 @@ def write_meta(
     size = meta_size(codec, unit)
     rank = block_rank(unit, codec.block_order, codec.block_dim)
     path = path or f"{arr.path}_meta"
+    t_chunk = min(t_chunk, grid[0])
 
+    # The key encoding is spelled out because queries build the object keys
+    # themselves (see query.read_meta), and every object is written, even an
+    # all-zero one, so a missing object always means a damaged zone map.
     meta = zarr.create_array(
         store=arr.store_path.store,
         name=path,
         shape=(*grid, size),
-        chunks=(min(t_chunk, grid[0]), *grid[1:], size),
+        chunks=(t_chunk, *grid[1:], size),
         dtype="uint8",
         compressors=None,
         filters=None,
+        chunk_key_encoding={"name": "default", "separator": "/"},
+        config={"write_empty_chunks": True},
         overwrite=True,
     )
 
@@ -591,5 +601,5 @@ def write_meta(
         rows = list(ex.map(one, idxs))
 
     meta[...] = np.stack(rows).reshape(*grid, size)
-    arr.update_attributes({META_ATTR: path})
+    arr.update_attributes({META_ATTR: path, META_T_CHUNK_ATTR: t_chunk})
     return meta

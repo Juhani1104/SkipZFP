@@ -271,7 +271,7 @@ def test_rejects_metadata_of_wrong_shape(tmp_path):
     a = smooth_field(shape=(128, 32, 64), seed=10)
     z = make_array(tmp_path / "a", a, rate=8.0)
     g = zarr.open_group(str(tmp_path / "a"), mode="a")
-    g.create_array("wrong_meta", data=np.zeros((1, 1, 1, 4), np.uint8))
+    g.create_array("wrong_meta", data=np.ones((1, 1, 1, 4), np.uint8))
     z.update_attributes({codec.META_ATTR: "wrong_meta"})
     with pytest.raises(ValueError, match="does not match the array layout"):
         query.query_gt(z, 285.0)

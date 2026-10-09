@@ -22,7 +22,7 @@ from zarr.core.buffer import default_buffer_prototype
 from zarr.core.sync import sync
 
 from ._native import check, load_library
-from .codec import META_ATTR, find_codec, meta_size
+from .codec import META_ATTR, META_T_CHUNK_ATTR, find_codec, meta_size
 from .codec import native as codec_native
 
 
@@ -623,16 +623,61 @@ async def read_ranges(
     return out
 
 
-async def read_meta(arr: zarr.Array, lt: _Layout) -> tuple[np.ndarray, int, int]:
-    """Read the whole zone map, with its size in bytes and number of objects."""
+async def read_meta(
+    arr: zarr.Array, lt: _Layout, concurrency: int = 32
+) -> tuple[np.ndarray, int, int]:
+    """Read the whole zone map, with its size in bytes and number of objects.
+
+    The zone map's shape follows from the layout, so when arr records its
+    t_chunk the objects are fetched directly by key, skipping the round trip
+    to open the zone map's zarr.json. Arrays written before t_chunk was
+    recorded fall back to opening it as a Zarr array.
+    """
     path = arr.attrs.get(META_ATTR)
     if not path:
         raise ValueError("array has no metadata; run codec.write_meta first")
 
+    t_chunk = arr.attrs.get(META_T_CHUNK_ATTR)
+    if t_chunk is None:
+        return await read_meta_zarr(arr, lt, path)
+
+    rows = int(np.prod(lt.unit_grid[1:])) * lt.meta_size  # bytes per unit along t
+    obj_size = int(t_chunk) * rows
+    n_obj = ceildiv(lt.unit_grid[0], int(t_chunk))
+    store = arr.store_path.store
+    prefix = path.strip("/")
+    sem = asyncio.Semaphore(concurrency)
+
+    async def one(i: int) -> bytes:
+        key = f"{prefix}/c/{i}/0/0/0"
+        async with sem:
+            buf = await store.get(key, prototype=default_buffer_prototype())
+        # write_meta writes every object, so a missing one is never all zeros
+        if buf is None:
+            raise FileNotFoundError(key)
+        data = buf.to_bytes()
+        if len(data) != obj_size:
+            raise ValueError(
+                f"metadata object {i} has {len(data)} bytes, which does not match "
+                f"the array layout ({obj_size} bytes)"
+            )
+        return data
+
+    parts = await asyncio.gather(*(one(i) for i in range(n_obj)))
+    # the last object is padded to a full t_chunk, so cut it back to the grid
+    data = np.frombuffer(b"".join(parts), dtype=np.uint8)[: lt.unit_grid[0] * rows]
+    return data, n_obj * obj_size, n_obj
+
+
+async def read_meta_zarr(
+    arr: zarr.Array, lt: _Layout, path: str
+) -> tuple[np.ndarray, int, int]:
+    """Read the zone map by opening it as a Zarr array, as :func:`read_meta` returns."""
     meta = await zarr.api.asynchronous.open_array(
         store=arr.store_path.store,
         path=path,
         mode="r",
+        zarr_format=3,
     )
 
     if tuple(meta.shape) != (*lt.unit_grid, lt.meta_size):
@@ -775,7 +820,7 @@ async def _query_async(
     # 1. read the zone map: per-unit value range and error bounds, plus
     # per-block offsets
     t1 = time.perf_counter()
-    meta, meta_bytes, meta_requests = await read_meta(arr, lt)
+    meta, meta_bytes, meta_requests = await read_meta(arr, lt, opts.request_concurrency)
     meta_read_sec = time.perf_counter() - t1
 
     # 2. plan: classify every block as IN, OUT or MAYBE. plan_meta keeps only
