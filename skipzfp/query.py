@@ -384,6 +384,11 @@ class _Layout:
     unit_grid: tuple[int, int, int]  # units along each axis of the array
     blocks_per_unit: int
 
+    @property
+    def unit_grid_per_chunk(self) -> tuple[int, int, int]:
+        """Units along each axis of one chunk."""
+        return tuple(c // u for c, u in zip(self.chunk_shape, self.unit_shape))
+
 
 @dataclass(frozen=True)
 class _Range:
@@ -626,6 +631,57 @@ async def read_ranges(
     return out
 
 
+@dataclass(frozen=True)
+class _MetaObjects:
+    """Where the zone map objects of an array are and how big each one is."""
+
+    prefix: str
+    t_chunk: int  # units along the first axis in each object
+    rows: int  # bytes per unit along the first axis
+    count: int
+
+    @property
+    def size(self) -> int:
+        return self.t_chunk * self.rows
+
+
+def meta_objects(arr: zarr.Array, lt: _Layout) -> _MetaObjects | None:
+    """Locate the zone map objects, or return None if arr does not record t_chunk."""
+    path = arr.attrs.get(META_ATTR)
+    if not path:
+        raise ValueError("array has no metadata; run codec.write_meta first")
+
+    t_chunk = arr.attrs.get(META_T_CHUNK_ATTR)
+    if t_chunk is None:
+        return None
+
+    return _MetaObjects(
+        prefix=path.strip("/"),
+        t_chunk=int(t_chunk),
+        rows=int(np.prod(lt.unit_grid[1:])) * lt.meta_size,
+        count=ceildiv(lt.unit_grid[0], int(t_chunk)),
+    )
+
+
+async def read_meta_object(
+    store: Any, mo: _MetaObjects, i: int, sem: asyncio.Semaphore
+) -> np.ndarray:
+    """Read zone map object i, as a read-only view of the returned bytes."""
+    key = f"{mo.prefix}/c/{i}/0/0/0"
+    async with sem:
+        buf = await store.get(key, prototype=default_buffer_prototype())
+    # write_meta writes every object, so a missing one is never all zeros
+    if buf is None:
+        raise FileNotFoundError(key)
+    data = buf.as_numpy_array()
+    if len(data) != mo.size:
+        raise ValueError(
+            f"metadata object {i} has {len(data)} bytes, which does not match "
+            f"the array layout ({mo.size} bytes)"
+        )
+    return data
+
+
 async def read_meta(
     arr: zarr.Array, lt: _Layout, concurrency: int = 32
 ) -> tuple[np.ndarray, int, int]:
@@ -636,42 +692,21 @@ async def read_meta(
     to open the zone map's zarr.json. Arrays written before t_chunk was
     recorded fall back to opening it as a Zarr array.
     """
-    path = arr.attrs.get(META_ATTR)
-    if not path:
-        raise ValueError("array has no metadata; run codec.write_meta first")
+    mo = meta_objects(arr, lt)
+    if mo is None:
+        return await read_meta_zarr(arr, lt, arr.attrs[META_ATTR])
 
-    t_chunk = arr.attrs.get(META_T_CHUNK_ATTR)
-    if t_chunk is None:
-        return await read_meta_zarr(arr, lt, path)
-
-    rows = int(np.prod(lt.unit_grid[1:])) * lt.meta_size  # bytes per unit along t
-    obj_size = int(t_chunk) * rows
-    n_obj = ceildiv(lt.unit_grid[0], int(t_chunk))
     store = arr.store_path.store
-    prefix = path.strip("/")
     sem = asyncio.Semaphore(concurrency)
-
     # each object is copied straight into its slot, the only copy made
-    out = np.empty(n_obj * obj_size, dtype=np.uint8)
+    out = np.empty(mo.count * mo.size, dtype=np.uint8)
 
     async def one(i: int) -> None:
-        key = f"{prefix}/c/{i}/0/0/0"
-        async with sem:
-            buf = await store.get(key, prototype=default_buffer_prototype())
-        # write_meta writes every object, so a missing one is never all zeros
-        if buf is None:
-            raise FileNotFoundError(key)
-        data = buf.as_numpy_array()
-        if len(data) != obj_size:
-            raise ValueError(
-                f"metadata object {i} has {len(data)} bytes, which does not match "
-                f"the array layout ({obj_size} bytes)"
-            )
-        out[i * obj_size : (i + 1) * obj_size] = data
+        out[i * mo.size : (i + 1) * mo.size] = await read_meta_object(store, mo, i, sem)
 
-    await asyncio.gather(*(one(i) for i in range(n_obj)))
+    await asyncio.gather(*(one(i) for i in range(mo.count)))
     # the last object is padded to a full t_chunk, so cut it back to the grid
-    return out[: lt.unit_grid[0] * rows], n_obj * obj_size, n_obj
+    return out[: lt.unit_grid[0] * mo.rows], mo.count * mo.size, mo.count
 
 
 async def read_meta_zarr(
@@ -721,14 +756,15 @@ async def stream_count(
     hi: float,
     concurrency: int,
     threads: int,
+    sem: asyncio.Semaphore | None = None,
 ) -> tuple[int, int, float]:
     """Read each merged range and count lo < x <= hi as soon as it arrives.
 
     It returns the count, the bytes read and the decode seconds summed over
-    all reads.
+    all reads. Pass sem to share the concurrency limit with other reads.
     """
     loop = asyncio.get_running_loop()
-    sem = asyncio.Semaphore(concurrency)
+    sem = sem or asyncio.Semaphore(concurrency)
 
     def count(data: bytes, offs: np.ndarray) -> tuple[int, float]:
         t0 = time.perf_counter()
@@ -825,6 +861,13 @@ async def _query_async(
     keys = [full_key(arr, arr.metadata.encode_chunk_key(coord)) for coord in coords]
     store = arr.store_path.store
 
+    # With layer 0 and zone map objects that cover whole chunks along the
+    # first axis, each object is planned and its blocks read as soon as it
+    # arrives, overlapping the three steps below instead of running them in turn.
+    mo = meta_objects(arr, lt)
+    if layer == 0 and mo is not None and mo.t_chunk % lt.unit_grid_per_chunk[0] == 0:
+        return await _query_pipelined(arr, lt, mo, lo, hi, opts, keys, t0)
+
     # 1. read the zone map: per-unit value range and error bounds, plus
     # per-block offsets
     t1 = time.perf_counter()
@@ -840,7 +883,7 @@ async def _query_async(
         plan_meta(meta, lt, layer),
         lt.meta_size - 4 * (len(lt.layers) - 1),
         lt.unit_grid,
-        tuple(c // u for c, u in zip(lt.chunk_shape, lt.unit_shape)),
+        lt.unit_grid_per_chunk,
         lt.blocks_per_unit,
         lo,
         opts.threads,
@@ -991,6 +1034,107 @@ async def _query_async(
         payload_read_seconds=payload_read_sec,
         decode_seconds=decode_sec,
         total_seconds=time.perf_counter() - t0,
+    )
+
+
+async def _query_pipelined(
+    arr: zarr.Array,
+    lt: _Layout,
+    mo: _MetaObjects,
+    lo: float,
+    hi: float,
+    opts: QueryOptions,
+    keys: Sequence[str],
+    t0: float,
+) -> QueryResult:
+    """Run a layer 0 query one zone map object at a time.
+
+    Each object covers whole chunks along the first axis, so it can be planned
+    alone, and its MAYBE blocks are read while later objects are still
+    arriving. The objects and the block reads share one concurrency limit.
+    Since the steps overlap, metadata_read_seconds is the time until the last
+    object arrived, planning_seconds sums the planning of every object, and
+    payload_read_seconds runs from the first block read to the end.
+    """
+    store = arr.store_path.store
+    sem = asyncio.Semaphore(opts.request_concurrency)
+    subs = lt.unit_grid_per_chunk
+    chunks_per_step = lt.grid_shape[1] * lt.grid_shape[2]
+    meta_size = lt.meta_size - 4 * (len(lt.layers) - 1)
+    last_meta = t0
+    first_read = math.inf
+
+    def plan(slab: np.ndarray, n_units: int) -> tuple[Any, ...]:
+        t1 = time.perf_counter()
+        out = native().plan_chunks(
+            plan_meta(slab, lt, 0),
+            meta_size,
+            (n_units, *lt.unit_grid[1:]),
+            subs,
+            lt.blocks_per_unit,
+            lo,
+            1,  # objects are planned in parallel, one thread each
+            hi,
+        )
+        return (*out, time.perf_counter() - t1)
+
+    async def one(i: int) -> tuple[int, ...]:
+        nonlocal last_meta, first_read
+        data = await read_meta_object(store, mo, i, sem)
+        last_meta = max(last_meta, time.perf_counter())
+        u0 = i * mo.t_chunk
+        n_units = min(mo.t_chunk, lt.unit_grid[0] - u0)
+        chunk_ids, block_ids, n_in, n_out, sec = await asyncio.to_thread(
+            plan, data[: n_units * mo.rows], n_units
+        )
+        chunk_ids += np.uint32(u0 // subs[0] * chunks_per_step)
+        merged, blocks = merge_ranges(
+            keys, chunk_ids, block_ids, lt.layer_bytes[0], opts.merge_gap_blocks
+        )
+        if merged:
+            first_read = min(first_read, time.perf_counter())
+        n, nbytes, dec = await stream_count(
+            store,
+            merged,
+            blocks,
+            lt.layer_bytes[0],
+            lt.layers[0],
+            lt.block_dim,
+            lo,
+            hi,
+            opts.request_concurrency,
+            opts.threads,
+            sem,
+        )
+        return n_in, n_out, len(blocks), n, nbytes, len(merged), sec, dec
+
+    parts = np.array(
+        await asyncio.gather(*(one(i) for i in range(mo.count))), dtype=np.float64
+    ).reshape(-1, 8)
+    n_in, n_out, n_maybe, n_maybe_val, payload_bytes, n_reqs = (
+        int(x) for x in parts[:, :6].sum(axis=0)
+    )
+    plan_sec, decode_sec = (float(x) for x in parts[:, 6:].sum(axis=0))
+    end = time.perf_counter()
+    useful_bytes = n_maybe * lt.layer_bytes[0]
+
+    return QueryResult(
+        count=n_in * lt.values_per_block + n_maybe_val,
+        in_blocks=n_in,
+        out_blocks=n_out,
+        maybe_blocks=n_maybe,
+        total_blocks=len(keys) * lt.blocks_per_chunk,
+        metadata_bytes_read=mo.count * mo.size,
+        payload_bytes_read=payload_bytes,
+        metadata_requests=mo.count,
+        payload_requests=n_reqs,
+        useful_payload_bytes=useful_bytes,
+        payload_overread_bytes=payload_bytes - useful_bytes,
+        metadata_read_seconds=last_meta - t0,
+        planning_seconds=plan_sec,
+        payload_read_seconds=end - first_read if n_reqs else 0.0,
+        decode_seconds=decode_sec,
+        total_seconds=end - t0,
     )
 
 

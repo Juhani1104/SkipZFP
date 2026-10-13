@@ -162,3 +162,63 @@ def test_write_meta_requires_group(tmp_path):
     z[:] = a
     with pytest.raises(ValueError, match="inside a group"):
         codec.write_meta(z, a)
+
+
+def sub_chunk_array(tmp_path, layers=()):
+    """A 4x2x2 chunk grid of 4x2x2 units each, so t_chunk can split a chunk."""
+    a = smooth_field(shape=(128, 32, 64), seed=3)
+    g = zarr.open_group(str(tmp_path / "s"), mode="w")
+    z = g.create_array(
+        "data",
+        shape=a.shape,
+        chunks=(32, 16, 32),
+        dtype="float32",
+        serializer=codec.SkipZFPCodec(rate=8.0, sub_chunk=(8, 8, 16), layers=layers),
+        compressors=None,
+        filters=None,
+    )
+    z[:] = a
+    return z, a
+
+
+@pytest.mark.parametrize("layers", [(), (2.0, 4.0, 8.0)])
+@pytest.mark.parametrize(
+    "t_chunk, pipelined", [(4, True), (8, True), (100, True), (2, False), (3, False)]
+)
+def test_pipelined_query_matches_whole_zone_map(
+    tmp_path, monkeypatch, layers, t_chunk, pipelined
+):
+    """Planning one zone map object at a time gives the same answer as planning
+    the whole zone map, and is used only when objects cover whole chunks."""
+    z, a = sub_chunk_array(tmp_path, layers)
+    codec.write_meta(z, a, t_chunk=t_chunk)
+    calls = []
+    real = query._query_pipelined
+
+    async def spy(*args):
+        calls.append(1)
+        return await real(*args)
+
+    monkeypatch.setattr(query, "_query_pipelined", spy)
+    opts = query.QueryOptions(layer=0, merge_gap_blocks=2)
+    lo, hi = np.quantile(a, [0.3, 0.7])
+    got = [
+        query.query_gt(z, float(lo), options=opts),
+        query.query_range(z, float(lo), float(hi), options=opts),
+    ]
+    assert bool(calls) == pipelined
+
+    del z.attrs[codec.META_T_CHUNK_ATTR]
+    want = [
+        query.query_gt(z, float(lo), options=opts),
+        query.query_range(z, float(lo), float(hi), options=opts),
+    ]
+    for g_, w in zip(got, want):
+        assert (g_.count, g_.in_blocks, g_.out_blocks, g_.maybe_blocks) == (
+            w.count,
+            w.in_blocks,
+            w.out_blocks,
+            w.maybe_blocks,
+        )
+        assert g_.payload_bytes_read == w.payload_bytes_read
+        assert g_.payload_requests == w.payload_requests
