@@ -1,5 +1,6 @@
 """query_gt counts exactly, accounts for what it reads, and reports bad input."""
 
+import asyncio
 import os
 
 import numpy as np
@@ -219,6 +220,25 @@ def test_open_skipzfp_reads_only_zarr_json(one):
     arr = query.open_skipzfp(Recording(z.store_path.store), array_path=z.path)
     assert seen == [f"{z.path}/zarr.json"]
     assert query.query_gt(arr, 285.0).count == query.query_gt(z, 285.0).count
+
+
+def test_reads_are_decoded_in_place(one):
+    """read_one returns a view of the store's buffer, which count_offsets decodes
+    exactly like the same bytes copied out."""
+    z, rec = one
+    lt = query.get_layout(z)
+    key = query.full_key(z, z.metadata.encode_chunk_key((0, 0, 0)))
+    bs = lt.layer_bytes[0]
+    req = query._Range(key=key, start=0, end=4 * bs)
+    data = zarr.core.sync.sync(
+        query.read_one(z.store_path.store, req, asyncio.Semaphore(1))
+    )
+    assert isinstance(data, np.ndarray) and not data.flags.owndata
+    offs = np.arange(4, dtype=np.uint64) * bs
+    th = float(np.median(rec))
+    args = (offs, bs, lt.layers[0], lt.block_dim, th)
+    nat = query.native()
+    assert nat.count_offsets(data, *args) == nat.count_offsets(data.tobytes(), *args)
 
 
 # one call per public query function, so shared checks run on all three

@@ -74,7 +74,7 @@ class _Native:
         self.lib.szfp_merge_ranges.restype = ctypes.c_int
 
         self.lib.szfp_count_offsets_range.argtypes = [
-            ctypes.c_char_p,
+            ctypes.c_void_p,
             ctypes.c_size_t,
             ctypes.POINTER(ctypes.c_uint64),
             ctypes.c_size_t,
@@ -203,7 +203,7 @@ class _Native:
 
     def count_offsets(
         self,
-        data: bytes,
+        data: Any,
         offsets: np.ndarray,
         block_size: int,
         rate: float,
@@ -211,13 +211,17 @@ class _Native:
         th: float,
         hi: float = math.inf,
     ) -> int:
-        """Decode the blocks at the given byte offsets and count th < x <= hi."""
+        """Decode the blocks at the given byte offsets and count th < x <= hi.
+
+        data is any contiguous bytes-like object, read in place without a copy.
+        """
+        src = np.frombuffer(data, dtype=np.uint8)
         offs = np.ascontiguousarray(offsets, dtype=np.uint64)
         out = ctypes.c_size_t()
 
         code = self.lib.szfp_count_offsets_range(
-            data,
-            len(data),
+            src.ctypes.data,
+            src.size,
             offs.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
             len(offs),
             block_size,
@@ -579,11 +583,12 @@ async def read_one(
     store: Any,
     req: _Range,
     sem: asyncio.Semaphore,
-) -> bytes:
-    """Read one byte range.
+) -> np.ndarray:
+    """Read one byte range, as a uint8 view of the returned buffer.
 
-    It raises an error if the object is missing or fewer bytes come back
-    than requested.
+    The view avoids copying the bytes, which on a busy event loop costs about
+    as much as reading them. It raises an error if the object is missing or
+    fewer bytes come back than requested.
     """
     async with sem:
         buf = await store.get(
@@ -595,7 +600,7 @@ async def read_one(
     if buf is None:
         raise FileNotFoundError(req.key)
 
-    data = buf.to_bytes()
+    data = buf.as_numpy_array()
     want = req.end - req.start
 
     if len(data) != want:
@@ -610,7 +615,7 @@ async def read_ranges(
     *,
     concurrency: int,
     batch_size: int,
-) -> list[bytes]:
+) -> list[np.ndarray]:
     """Read byte ranges in batches.
 
     At most `concurrency` reads run at a time, and the results come back in
@@ -622,7 +627,7 @@ async def read_ranges(
         raise ValueError("request_batch_size must be greater than 0")
 
     sem = asyncio.Semaphore(concurrency)
-    out: list[bytes] = []
+    out: list[np.ndarray] = []
 
     for batch in batched(reqs, batch_size):
         parts = await asyncio.gather(*(read_one(store, req, sem) for req in batch))
@@ -766,7 +771,7 @@ async def stream_count(
     loop = asyncio.get_running_loop()
     sem = sem or asyncio.Semaphore(concurrency)
 
-    def count(data: bytes, offs: np.ndarray) -> tuple[int, float]:
+    def count(data: np.ndarray, offs: np.ndarray) -> tuple[int, float]:
         t0 = time.perf_counter()
         n = native().count_offsets(data, offs, block_size, rate, block_dim, lo, hi)
         return n, time.perf_counter() - t0
@@ -972,8 +977,7 @@ async def _query_async(
         # row i = block i's layer-0 bytes, then layer-1 bytes, ... which is a
         # valid ZFP stream at the combined rate
         out = np.empty((len(sorted_blocks), int(cols[-1])), dtype=np.uint8)
-        for data, (j, item) in zip(payload_parts, fills):
-            buf = np.frombuffer(data, dtype=np.uint8)
+        for buf, (j, item) in zip(payload_parts, fills):
             if j is not None:
                 rows = (
                     sorted_blocks[item.item_start : item.item_end].astype(np.int64)
