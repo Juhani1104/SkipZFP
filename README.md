@@ -140,14 +140,16 @@ overhead are computed offline.
 
 The same data and scripts were rerun on an m5n.4xlarge VM (us-east-1) reading from
 Amazon S3, and from S3 Express One Zone in the VM's own zone. Threshold query speedup
-over the best baseline, 0.1–50% selectivity:
+over the best baseline, t2m:
 
-| Storage | Query code | t2m | ws |
-|---|---|---|---|
-| S3 | as in the GCP run | 1.05–1.57x | 1.13–1.64x |
-| S3 | current | 1.39–2.39x | 1.45–2.27x |
-| S3 Express One Zone | as in the GCP run | 1.13–1.30x | 1.04–1.67x |
-| S3 Express One Zone | current | 1.47–2.14x | 1.43–2.30x |
+| Selectivity | 0.1% | 1% | 10% | 50% |
+|---|---|---|---|---|
+| S3, code of the GCP run | 1.6x | 1.3x | 1.1x | 1.2x |
+| S3, current code | **2.4x** | **1.8x** | **1.4x** | **1.6x** |
+| S3 Express, code of the GCP run | 1.3x | 1.2x | 1.1x | 1.2x |
+| S3 Express, current code | **2.1x** | **1.6x** | **1.5x** | **1.6x** |
+
+For ws the current code is 1.4–2.3x faster than the best baseline on both stores.
 
 The current query reads the zone map objects by key, plans and reads each one as soon
 as it arrives, and decodes each read in place instead of copying it, which together
