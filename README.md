@@ -136,13 +136,32 @@ overhead are computed offline.
 | Filtered aggregates | guaranteed COUNT interval from metadata alone |
 | Overhead | 3.16% at 8 bpv |
 
+### Also on AWS
+
+The same data and scripts were rerun on an m5n.4xlarge VM (us-east-1) reading from
+Amazon S3, and from S3 Express One Zone in the VM's own zone. Threshold query speedup
+over the best baseline, t2m:
+
+| Storage | Query code | 1–50% | 0.1% |
+|---|---|---|---|
+| S3 | as in the GCP run | 1.19–1.49x | 1.00x |
+| S3 | pipelined zone map reads | 1.53–1.99x | 2.25x |
+| S3 Express One Zone | pipelined zone map reads | 1.46–1.77x | 2.05x |
+
+S3 has a higher per-request latency than Cloud Storage, so at 0.1% selectivity, where a
+query issues many small reads, the code used for the GCP run only ties the best
+baseline. The pipelined query reads the zone map objects by key and plans and reads
+each one as soon as it arrives, which brings the lead back on every store. Aggregates,
+filtered aggregates and overhead give identical results on both clouds. Results are in
+[`experiments/results_aws/`](experiments/results_aws).
+
 ## Reproducing the paper
 
 | Level | Command | Needs |
 |---|---|---|
 | Redraw figures | `python experiments/figures.py` *(with the paper)* | this repo |
 | Run the tests | `pytest` | this repo |
-| Rerun everything | `BUCKET=gs://… bash experiments/run_cloud.sh` | a GCP VM and bucket |
+| Rerun everything | `BUCKET=gs://… bash experiments/run_cloud.sh` (or `s3://…`) | a GCP or AWS VM and bucket |
 
 On a Debian or Ubuntu VM you create, `run_cloud.sh` installs the dependencies, builds
 libzfp, downloads ERA5 from the public

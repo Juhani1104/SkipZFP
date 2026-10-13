@@ -109,6 +109,14 @@ def upload(path, dest):
     if dest.startswith("gs://"):
         cmd = ["gcloud", "storage", "cp", "-r", "-q", str(path), dest + "/"]
         subprocess.run(cmd, check=True)
+    elif dest.startswith("s3://"):
+        # unlike gcloud, aws copies a folder's contents, so name the folder
+        cmd = ["aws", "s3", "cp", "--only-show-errors"]
+        if Path(path).is_dir():
+            cmd += ["--recursive", str(path), f"{dest}/{Path(path).name}"]
+        else:
+            cmd += [str(path), dest + "/"]
+        subprocess.run(cmd, check=True)
     else:
         Path(dest).mkdir(parents=True, exist_ok=True)
         subprocess.run(["cp", "-r", str(path), dest + "/"], check=True)
@@ -142,7 +150,9 @@ def open_counted(url):
     from zarr.storage import ObjectStore
 
     full = url if "://" in url else "file://" + os.path.abspath(url)
-    store = CountingStore(ObjectStore(from_url(full), read_only=True))
+    # S3 Express One Zone (directory bucket) names end in --x-s3
+    opts = {"s3_express": True} if "--x-s3" in full else {}
+    store = CountingStore(ObjectStore(from_url(full, **opts), read_only=True))
     arr = zarr.open_array(store=store, path="data", mode="r")
     return arr, store
 
