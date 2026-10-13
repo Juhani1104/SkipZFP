@@ -144,17 +144,19 @@ over the best baseline, t2m:
 
 | Selectivity | 0.1% | 1% | 10% | 50% |
 |---|---|---|---|---|
-| S3, code of the GCP run | 1.6x | 1.3x | 1.1x | 1.2x |
-| S3, current code | **2.4x** | **1.8x** | **1.4x** | **1.6x** |
-| S3 Express, code of the GCP run | 1.3x | 1.2x | 1.1x | 1.2x |
-| S3 Express, current code | **2.1x** | **1.6x** | **1.5x** | **1.6x** |
+| S3, first release | 1.6x | 1.3x | 1.1x | 1.2x |
+| S3, with pipelined, zero-copy reads | **2.4x** | **1.8x** | **1.4x** | **1.6x** |
+| S3 Express, first release | 1.3x | 1.2x | 1.1x | 1.2x |
+| S3 Express, with pipelined, zero-copy reads | **2.1x** | **1.6x** | **1.5x** | **1.6x** |
 
-For ws the current code is 1.4–2.3x faster than the best baseline on both stores.
+For ws the pipelined, zero-copy reads are 1.4–2.3x faster than the best baseline on both
+stores. Unlike the GCP run, the baselines here also read without copying each response,
+so these numbers are not directly comparable with the table above.
 
-The current query reads the zone map objects by key, plans and reads each one as soon
+The newer query reads the zone map objects by key, plans and reads each one as soon
 as it arrives, and decodes each read in place instead of copying it, which together
-cut query time on S3 by 16–35%. The baselines also read without copying, and every
-version runs interleaved with the others so they all see the same network. Aggregates,
+cut query time on S3 by 16–35%. Every version runs interleaved with the others, so
+they all see the same network. Aggregates,
 filtered aggregates and overhead give identical results on both clouds. Results are in
 [`experiments/results_aws/`](experiments/results_aws).
 
