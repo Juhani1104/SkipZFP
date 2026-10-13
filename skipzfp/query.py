@@ -651,25 +651,27 @@ async def read_meta(
     prefix = path.strip("/")
     sem = asyncio.Semaphore(concurrency)
 
-    async def one(i: int) -> bytes:
+    # each object is copied straight into its slot, the only copy made
+    out = np.empty(n_obj * obj_size, dtype=np.uint8)
+
+    async def one(i: int) -> None:
         key = f"{prefix}/c/{i}/0/0/0"
         async with sem:
             buf = await store.get(key, prototype=default_buffer_prototype())
         # write_meta writes every object, so a missing one is never all zeros
         if buf is None:
             raise FileNotFoundError(key)
-        data = buf.to_bytes()
+        data = buf.as_numpy_array()
         if len(data) != obj_size:
             raise ValueError(
                 f"metadata object {i} has {len(data)} bytes, which does not match "
                 f"the array layout ({obj_size} bytes)"
             )
-        return data
+        out[i * obj_size : (i + 1) * obj_size] = data
 
-    parts = await asyncio.gather(*(one(i) for i in range(n_obj)))
+    await asyncio.gather(*(one(i) for i in range(n_obj)))
     # the last object is padded to a full t_chunk, so cut it back to the grid
-    data = np.frombuffer(b"".join(parts), dtype=np.uint8)[: lt.unit_grid[0] * rows]
-    return data, n_obj * obj_size, n_obj
+    return out[: lt.unit_grid[0] * rows], n_obj * obj_size, n_obj
 
 
 async def read_meta_zarr(
@@ -695,8 +697,11 @@ def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
     """Keep only one layer's error bound in each record of the zone map.
 
     The C planner reads records with a single error bound, so the bounds of
-    the other layers are dropped.
+    the other layers are dropped. With a single layer the records already
+    have that form, so meta is returned without a copy.
     """
+    if len(lt.layers) == 1:
+        return meta
     m = meta.reshape(-1, lt.meta_size)
     n_layer = len(lt.layers)
     eps = m[:, 8 + 4 * layer : 12 + 4 * layer]
