@@ -150,7 +150,9 @@ def open_counted(url):
     from zarr.storage import ObjectStore
 
     full = url if "://" in url else "file://" + os.path.abspath(url)
-    store = CountingStore(ObjectStore(from_url(full), read_only=True))
+    # S3 Express One Zone (directory bucket) names end in --x-s3
+    opts = {"s3_express": True} if "--x-s3" in full else {}
+    store = CountingStore(ObjectStore(from_url(full, **opts), read_only=True))
     arr = zarr.open_array(store=store, path="data", mode="r")
     return arr, store
 
