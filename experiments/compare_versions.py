@@ -24,6 +24,7 @@ sys.path.insert(0, sys.argv[5])
 from common import open_counted
 from skipzfp import query
 import zarr
+zarr.config.set({"async.concurrency": int(sys.argv[3])})  # as exp2 does
 arr, store = open_counted(sys.argv[1])
 zarr.core.sync.sync(store.exists("zarr.json"))
 store.requests = store.bytes = 0

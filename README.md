@@ -140,18 +140,19 @@ overhead are computed offline.
 
 The same data and scripts were rerun on an m5n.4xlarge VM (us-east-1) reading from
 Amazon S3, and from S3 Express One Zone in the VM's own zone. Threshold query speedup
-over the best baseline, t2m:
+over the best baseline, 0.1–50% selectivity:
 
-| Storage | Query code | 1–50% | 0.1% |
+| Storage | Query code | t2m | ws |
 |---|---|---|---|
-| S3 | as in the GCP run | 1.19–1.49x | 1.00x |
-| S3 | pipelined zone map reads | 1.53–1.99x | 2.25x |
-| S3 Express One Zone | pipelined zone map reads | 1.46–1.77x | 2.05x |
+| S3 | as in the GCP run | 1.05–1.57x | 1.13–1.64x |
+| S3 | current | 1.39–2.39x | 1.45–2.27x |
+| S3 Express One Zone | as in the GCP run | 1.13–1.30x | 1.04–1.67x |
+| S3 Express One Zone | current | 1.47–2.14x | 1.43–2.30x |
 
-S3 has a higher per-request latency than Cloud Storage, so at 0.1% selectivity, where a
-query issues many small reads, the code used for the GCP run only ties the best
-baseline. The pipelined query reads the zone map objects by key and plans and reads
-each one as soon as it arrives, which brings the lead back on every store. Aggregates,
+The current query reads the zone map objects by key, plans and reads each one as soon
+as it arrives, and decodes each read in place instead of copying it, which together
+cut query time on S3 by 16–35%. The baselines also read without copying, and every
+version runs interleaved with the others so they all see the same network. Aggregates,
 filtered aggregates and overhead give identical results on both clouds. Results are in
 [`experiments/results_aws/`](experiments/results_aws).
 
