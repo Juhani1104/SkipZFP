@@ -1,6 +1,6 @@
 """A/B test SkipZFP threshold queries across code versions on the same store.
 
-usage: python ab_versions.py <root> <exp2.jsonl> <out.jsonl> NAME=PYTHON:PYTHONPATH ...
+usage: python compare_versions.py <root> <exp2.jsonl> <out.jsonl> NAME=PYTHON:PYTHONPATH ...
        [--sels 0.001,0.01,0.1] [--conc 128,256,512] [--reps 3] [--var t2m]
        [--size k8t[,T128,...]] [--gap 256000]
 

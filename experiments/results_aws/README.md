@@ -19,14 +19,14 @@ gap, as in the GCP run.
 | `mdr/` | + zone map read by key | S3 | `exp2_threshold_query.py run` |
 | `pipe/` | + pipelined zone map reads | S3 | `exp2_threshold_query.py run` |
 | `express_pipe/` | + pipelined zone map reads | S3 Express | `exp2_threshold_query.py run` |
-| `ab_versions_s3.jsonl` | all three | S3 | `ab_versions.py`, SkipZFP k8t only |
-| `ab_versions_express.jsonl` | all three | S3 Express | `ab_versions.py`, SkipZFP k8t only |
-| `ab_merge_gap/gap_<bytes>.jsonl` | pipelined | S3 | `ab_versions.py --gap <bytes>` |
-| `ab_shard_size.jsonl` | pipelined | S3 | `prep_shards.py`, then `ab_versions.py --size T64,...` |
+| `versions_s3.jsonl` | all three | S3 | `compare_versions.py`, SkipZFP k8t only |
+| `versions_express.jsonl` | all three | S3 Express | `compare_versions.py`, SkipZFP k8t only |
+| `merge_gap/gap_<bytes>.jsonl` | pipelined | S3 | `compare_versions.py --gap <bytes>` |
+| `shard_size.jsonl` | pipelined | S3 | `prep_shards.py`, then `compare_versions.py --size T64,...` |
 
-The `ab_*` files interleave the code versions (or sizes) in a shuffled order within
-each repetition, so changes in the network over time hit each one alike. In
-`ab_versions_s3.jsonl` and `ab_merge_gap/` the rows have no `var` field: the first
-half of each file is t2m and the second half is ws.
+The `versions_*`, `merge_gap` and `shard_size` files interleave the code versions (or
+sizes) in a shuffled order within each repetition, so changes in the network over time
+hit each one alike. In `versions_s3.jsonl` and `merge_gap/` the rows have no `var`
+field: the first half of each file is t2m and the second half is ws.
 
 `exp3`–`exp5` in `main/` match `../results/` exactly.
