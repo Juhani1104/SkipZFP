@@ -156,8 +156,8 @@ so these numbers are not directly comparable with the table above.
 The newer query reads the zone map objects by key, plans and reads each one as soon
 as it arrives, and decodes each read in place instead of copying it, which together
 cut query time on S3 by 16–35%. Every version runs interleaved with the others, so
-they all see the same network. Aggregates,
-filtered aggregates and overhead give identical results on both clouds. Results are in
+they all see the same network. Aggregates, filtered aggregates and overhead give
+identical results on both clouds. Results are in
 [`experiments/results_aws/`](experiments/results_aws).
 
 ## Reproducing the paper
