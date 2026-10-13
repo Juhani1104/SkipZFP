@@ -176,13 +176,14 @@ async def q_chunks(arr, pts, conc, kind, sem=None):
         if kind == "zstd":
             out[t, i] = c.decode_many(data, [0], [len(data)], raw).reshape(ch)
         else:
-            out[t, i] = zfpy.decompress_numpy(data).reshape(ch)
+            # zfpy only takes bytes, so copy here, on the worker thread
+            out[t, i] = zfpy.decompress_numpy(bytes(data)).reshape(ch)
 
     async def one(t, i, cy, cx):
         key = query.full_key(arr, arr.metadata.encode_chunk_key((t, cy, cx)))
         async with sem:
             buf = await store.get(key, prototype=P)
-        await loop.run_in_executor(POOL, decode, buf.to_bytes(), t, i)
+        await loop.run_in_executor(POOL, decode, buf.as_numpy_array(), t, i)
 
     await asyncio.gather(
         *(
@@ -225,7 +226,7 @@ async def q_zshard(arr, pts, conc, index_cache, sem=None):
                     await store.get(
                         key, prototype=P, byte_range=SuffixByteRequest(n_inner * 16 + 4)
                     )
-                ).to_bytes()
+                ).as_numpy_array()
             index = np.frombuffer(tail[:-4], "<u8").reshape(n_inner, 2)
         else:
             index = index_cache[t]
@@ -245,7 +246,7 @@ async def q_zshard(arr, pts, conc, index_cache, sem=None):
             async with sem:
                 data = (
                     await store.get(key, prototype=P, byte_range=RangeByteRequest(s, e))
-                ).to_bytes()
+                ).as_numpy_array()
 
             def decode():
                 v = c.decode_many(data, offs[g] - np.uint64(s), sizes[g], raw).reshape(
