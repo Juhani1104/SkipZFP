@@ -206,6 +206,21 @@ def test_open_skipzfp_rejects_options_for_open_array(one, kw, msg):
         query.open_skipzfp(z, **kw)
 
 
+def test_open_skipzfp_reads_only_zarr_json(one):
+    """Opening reads the Zarr v3 zarr.json and none of the Zarr v2 files."""
+    z, _ = one
+    seen = []
+
+    class Recording(zarr.storage.WrapperStore):
+        async def get(self, key, prototype, byte_range=None):
+            seen.append(key)
+            return await self._store.get(key, prototype, byte_range)
+
+    arr = query.open_skipzfp(Recording(z.store_path.store), array_path=z.path)
+    assert seen == [f"{z.path}/zarr.json"]
+    assert query.query_gt(arr, 285.0).count == query.query_gt(z, 285.0).count
+
+
 # one call per public query function, so shared checks run on all three
 CALLS = {
     "gt": lambda z, **kw: query.query_gt(z, 285.0, **kw),

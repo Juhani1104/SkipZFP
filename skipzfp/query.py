@@ -415,7 +415,9 @@ def open_skipzfp(
     """Open an array for reading, or return it as is if already opened.
 
     It does not check that the array uses the skipzfp codec, since the
-    query functions do that.
+    query functions do that. The skipzfp codec only exists for Zarr v3, so
+    only zarr.json is read, skipping the two Zarr v2 files zarr would
+    otherwise request alongside it.
 
     Args:
         source: An opened zarr.Array, or a local path, URL or store that
@@ -445,6 +447,7 @@ def open_skipzfp(
         "store": store,
         "path": array_path,
         "mode": "r",
+        "zarr_format": 3,
     }
 
     if storage_options:
