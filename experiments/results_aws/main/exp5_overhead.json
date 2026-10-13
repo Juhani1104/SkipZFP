@@ -1,0 +1,57 @@
+[
+  {
+    "rate": 2,
+    "blocks_3d": 512,
+    "payload_3d": 8192,
+    "meta_3d": 1036,
+    "overhead_3d": 0.12646484375,
+    "blocks_2d": 2048,
+    "payload_2d": 8192,
+    "meta_2d": 4108,
+    "overhead_2d": 0.50146484375
+  },
+  {
+    "rate": 4,
+    "blocks_3d": 512,
+    "payload_3d": 16384,
+    "meta_3d": 1036,
+    "overhead_3d": 0.063232421875,
+    "blocks_2d": 2048,
+    "payload_2d": 16384,
+    "meta_2d": 4108,
+    "overhead_2d": 0.250732421875
+  },
+  {
+    "rate": 8,
+    "blocks_3d": 512,
+    "payload_3d": 32768,
+    "meta_3d": 1036,
+    "overhead_3d": 0.0316162109375,
+    "blocks_2d": 2048,
+    "payload_2d": 32768,
+    "meta_2d": 4108,
+    "overhead_2d": 0.1253662109375
+  },
+  {
+    "rate": 12,
+    "blocks_3d": 512,
+    "payload_3d": 49152,
+    "meta_3d": 1036,
+    "overhead_3d": 0.021077473958333332,
+    "blocks_2d": 2048,
+    "payload_2d": 49152,
+    "meta_2d": 4108,
+    "overhead_2d": 0.08357747395833333
+  },
+  {
+    "rate": 16,
+    "blocks_3d": 512,
+    "payload_3d": 65536,
+    "meta_3d": 1036,
+    "overhead_3d": 0.01580810546875,
+    "blocks_2d": 2048,
+    "payload_2d": 65536,
+    "meta_2d": 4108,
+    "overhead_2d": 0.06268310546875
+  }
+]
