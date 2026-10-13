@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# Reproduce every experiment on a fresh Google Cloud VM (Debian or Ubuntu).
+# Reproduce every experiment on a fresh Google Cloud or AWS VM (Debian or Ubuntu).
 #
 #   BUCKET=gs://your-bucket/skipzfp bash experiments/run_cloud.sh [step ...]
+#   BUCKET=s3://your-bucket/skipzfp bash experiments/run_cloud.sh [step ...]
 #
 # Steps run in order: setup fetch prepare exp1 exp2 sensitivity local.
 # Pass step names to run only some of them. Every step can be rerun; downloads and
-# measurements resume where they stopped. The VM's service account needs read/write
-# access to BUCKET, and the VM should be in the same region as the bucket.
+# measurements resume where they stopped. The VM's service account (GCP) or instance
+# role (AWS) needs read/write access to BUCKET, and the VM should be in the same region
+# as the bucket. On AWS, set AWS_REGION to the bucket's region (default us-east-1).
 set -euo pipefail
 
-: "${BUCKET:?set BUCKET to a gs:// prefix you can write to}"
+: "${BUCKET:?set BUCKET to a gs:// or s3:// prefix you can write to}"
+export AWS_REGION="${AWS_REGION:-us-east-1}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 EXP="$REPO/experiments"
 DATA="${DATA:-$HOME/skipzfp_data}"
@@ -28,6 +31,9 @@ step_setup() {
             -DBUILD_TESTING=OFF -DBUILD_UTILITIES=OFF
         cmake --build /tmp/zfp/build -j "$(nproc)" --target install
         rm -rf /tmp/zfp
+    fi
+    if [[ "$BUCKET" == s3://* ]] && ! command -v aws >/dev/null; then
+        sudo snap install aws-cli --classic
     fi
     python3 -m venv "$REPO/.venv"
     "$PY" -m pip install -q -r "$REPO/requirements.txt"

@@ -109,6 +109,14 @@ def upload(path, dest):
     if dest.startswith("gs://"):
         cmd = ["gcloud", "storage", "cp", "-r", "-q", str(path), dest + "/"]
         subprocess.run(cmd, check=True)
+    elif dest.startswith("s3://"):
+        # unlike gcloud, aws copies a folder's contents, so name the folder
+        cmd = ["aws", "s3", "cp", "--only-show-errors", str(path)]
+        if Path(path).is_dir():
+            cmd += ["--recursive", f"{dest}/{Path(path).name}"]
+        else:
+            cmd += [dest + "/"]
+        subprocess.run(cmd, check=True)
     else:
         Path(dest).mkdir(parents=True, exist_ok=True)
         subprocess.run(["cp", "-r", str(path), dest + "/"], check=True)
