@@ -142,7 +142,7 @@ overhead are computed offline.
 |---|---|---|
 | Redraw figures | `python experiments/figures.py` *(with the paper)* | this repo |
 | Run the tests | `pytest` | this repo |
-| Rerun everything | `BUCKET=gs://… bash experiments/run_cloud.sh` | a GCP VM and bucket |
+| Rerun everything | `BUCKET=gs://… bash experiments/run_cloud.sh` (or `s3://…`) | a GCP or AWS VM and bucket |
 
 On a Debian or Ubuntu VM you create, `run_cloud.sh` installs the dependencies, builds
 libzfp, downloads ERA5 from the public
