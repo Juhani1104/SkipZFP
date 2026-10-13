@@ -206,6 +206,21 @@ def test_open_skipzfp_rejects_options_for_open_array(one, kw, msg):
         query.open_skipzfp(z, **kw)
 
 
+def test_open_skipzfp_reads_only_zarr_json(one):
+    """Opening reads the Zarr v3 zarr.json and none of the Zarr v2 files."""
+    z, _ = one
+    seen = []
+
+    class Recording(zarr.storage.WrapperStore):
+        async def get(self, key, prototype, byte_range=None):
+            seen.append(key)
+            return await self._store.get(key, prototype, byte_range)
+
+    arr = query.open_skipzfp(Recording(z.store_path.store), array_path=z.path)
+    assert seen == [f"{z.path}/zarr.json"]
+    assert query.query_gt(arr, 285.0).count == query.query_gt(z, 285.0).count
+
+
 # one call per public query function, so shared checks run on all three
 CALLS = {
     "gt": lambda z, **kw: query.query_gt(z, 285.0, **kw),
@@ -271,7 +286,7 @@ def test_rejects_metadata_of_wrong_shape(tmp_path):
     a = smooth_field(shape=(128, 32, 64), seed=10)
     z = make_array(tmp_path / "a", a, rate=8.0)
     g = zarr.open_group(str(tmp_path / "a"), mode="a")
-    g.create_array("wrong_meta", data=np.zeros((1, 1, 1, 4), np.uint8))
+    g.create_array("wrong_meta", data=np.ones((1, 1, 1, 4), np.uint8))
     z.update_attributes({codec.META_ATTR: "wrong_meta"})
     with pytest.raises(ValueError, match="does not match the array layout"):
         query.query_gt(z, 285.0)
