@@ -29,6 +29,7 @@ from common import (
     open_counted,
     quantiles,
     query,
+    read_slabs,
     store_url,
 )
 
@@ -97,8 +98,8 @@ def thresholds(raw, nt=None, step=64 * 16, cache=None):
         a = load_era5(raw, var, nt, cache=cache)
         ths[var] = [float(x) for x in quantiles(a, [1 - s for s in SELECTIVITIES])]
         truth[var] = [0] * len(SELECTIVITIES)
-        for s in range(0, a.shape[0], step):
-            blk = a[s : s + step].astype(np.float64)
+        for _, _, x in read_slabs(a, step):
+            blk = x.astype(np.float64)
             for i, t in enumerate(ths[var]):
                 truth[var][i] += int((blk > t).sum())
         del a

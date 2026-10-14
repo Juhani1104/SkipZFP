@@ -1,5 +1,6 @@
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -19,8 +20,9 @@ CONCURRENCY = 128
 EMPTY = np.iinfo(np.uint64).max
 VARS = ("t2m", "ws")
 # time steps handled at once by code that must not hold a whole variable in memory;
-# a multiple of every chunk and shard length along time
-SLAB = 64 * 16
+# a multiple of every chunk and shard length along time. 4096 steps of 128 x 256
+# float32 is 537 MB, enough chunks to keep every core busy within one slab.
+SLAB = 64 * 64
 
 
 def shape_of(tag):
@@ -63,6 +65,25 @@ def slabs(n, step=SLAB):
         yield s, min(s + step, n)
 
 
+def read_slabs(a, step=SLAB, read=None):
+    """Yield (start, stop, values) for each time slab of a, in memory.
+
+    The next slab is read on another thread while the caller works on this one, so
+    the disk and the CPU stay busy together. read(start, stop) defaults to copying
+    a[start:stop], which is what pulls a memory map from disk; with a custom read, a
+    can be just the number of steps.
+    """
+    read = read or (lambda s, e: np.array(a[s:e]))
+    spans = list(slabs(a.shape[0] if hasattr(a, "shape") else a, step))
+    with ThreadPoolExecutor(1) as ex:
+        nxt = ex.submit(read, *spans[0]) if spans else None
+        for i, (s, e) in enumerate(spans):
+            cur = nxt.result()
+            if i + 1 < len(spans):
+                nxt = ex.submit(read, *spans[i + 1])
+            yield s, e, cur
+
+
 def _era5_slab(g, var, s, e):
     if var in g:
         return np.asarray(g[var][s:e])
@@ -88,8 +109,8 @@ def load_era5(path, var, nt=None, cache=None):
         part = out.with_suffix(".part.npy")
         shape = (n, *g["t2m"].shape[1:])
         mm = np.lib.format.open_memmap(part, mode="w+", dtype=np.float32, shape=shape)
-        for s, e in slabs(n):
-            mm[s:e] = _era5_slab(g, var, s, e)
+        for s, e, x in read_slabs(n, read=lambda s, e: _era5_slab(g, var, s, e)):
+            mm[s:e] = x
         mm.flush()
         del mm
         part.rename(out)
@@ -101,8 +122,8 @@ def load_era5(path, var, nt=None, cache=None):
 
 def write_slabs(z, a):
     """z[:] = a, one time slab at a time."""
-    for s, e in slabs(a.shape[0]):
-        z[s:e] = a[s:e]
+    for s, e, x in read_slabs(a):
+        z[s:e] = x
 
 
 def chunk_stats(a, chunk):
@@ -111,7 +132,7 @@ def chunk_stats(a, chunk):
         b = x.reshape(g[0], chunk[0], g[1], chunk[1], g[2], chunk[2])
         return np.stack([b.min(axis=(1, 3, 5)), b.max(axis=(1, 3, 5))], -1)
 
-    parts = [one(np.asarray(a[s:e])) for s, e in slabs(a.shape[0])]
+    parts = [one(x) for _, _, x in read_slabs(a)]
     return np.concatenate(parts).astype(np.float32)
 
 
@@ -123,7 +144,7 @@ def inner_stats(a, shard, inner):
         b = b.transpose(0, 3, 6, 1, 4, 7, 2, 5, 8).reshape(*g, int(np.prod(k)), -1)
         return np.stack([b.min(-1), b.max(-1)], -1)
 
-    parts = [one(np.asarray(a[s:e])) for s, e in slabs(a.shape[0])]
+    parts = [one(x) for _, _, x in read_slabs(a)]
     return np.concatenate(parts).astype(np.float32)
 
 
@@ -158,8 +179,7 @@ def quantiles(a, qs):
         known = 32 - shift - bits  # bits already fixed in prefix
         groups = sorted({prefix[r] for r in ranks})
         hist = {p: np.zeros(1 << bits, np.int64) for p in groups}
-        for s, e in slabs(a.shape[0]):
-            x = np.asarray(a[s:e])
+        for _, _, x in read_slabs(a):
             if np.isnan(x).any():
                 raise ValueError("quantiles needs data without NaN")
             k = _sort_keys(x).ravel()
