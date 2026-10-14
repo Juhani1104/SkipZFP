@@ -138,26 +138,27 @@ overhead are computed offline.
 
 ### Also on AWS
 
-The same data and scripts were rerun on an m5n.4xlarge VM (us-east-1) reading from
-Amazon S3, and from S3 Express One Zone in the VM's own zone. Threshold query speedup
-over the best baseline, t2m:
+The same data and scripts were rerun on an m5n.4xlarge VM (us-east-1), reading from
+Amazon S3 and from S3 Express One Zone, a lower-latency S3 storage class that keeps the
+data in a single availability zone; we put it in the same zone as the VM. Threshold
+query speedup over the best baseline on temperature (t2m):
 
 | Selectivity | 0.1% | 1% | 10% | 50% |
 |---|---|---|---|---|
-| S3, first release | 1.6x | 1.3x | 1.1x | 1.2x |
-| S3, with pipelined, zero-copy reads | **2.4x** | **1.8x** | **1.4x** | **1.6x** |
-| S3 Express, first release | 1.3x | 1.2x | 1.1x | 1.2x |
-| S3 Express, with pipelined, zero-copy reads | **2.1x** | **1.6x** | **1.5x** | **1.6x** |
+| S3, original query | 1.6x | 1.3x | 1.1x | 1.2x |
+| S3, optimized query | **2.4x** | **1.8x** | **1.4x** | **1.6x** |
+| S3 Express, original query | 1.3x | 1.2x | 1.1x | 1.2x |
+| S3 Express, optimized query | **2.1x** | **1.6x** | **1.5x** | **1.6x** |
 
-For ws the pipelined, zero-copy reads are 1.4–2.3x faster than the best baseline on both
-stores. Unlike the GCP run, the baselines here also read without copying each response,
-so these numbers are not directly comparable with the table above.
+The original query is the one measured on Google Cloud above. The optimized query reads
+the zone map objects by key, plans and reads each one as soon as it arrives, and decodes
+each read in place instead of copying it; together these cut query time on S3 by
+16–35%. On wind speed (ws) it is 1.4–2.3x faster than the best baseline on both stores.
 
-The newer query reads the zone map objects by key, plans and reads each one as soon
-as it arrives, and decodes each read in place instead of copying it, which together
-cut query time on S3 by 16–35%. Every version runs interleaved with the others, so
-they all see the same network. Aggregates, filtered aggregates and overhead give
-identical results on both clouds. Results are in
+Unlike the Google Cloud run, the baselines on AWS also read without copying each
+response, so these numbers are not directly comparable with the table above. Every
+version runs interleaved with the others, so they all see the same network. Aggregates,
+filtered aggregates and overhead give identical results on both clouds. Results are in
 [`experiments/results_aws/`](experiments/results_aws).
 
 ## Reproducing the paper
