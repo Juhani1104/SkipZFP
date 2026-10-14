@@ -142,17 +142,22 @@ The same data and scripts were rerun on an m5n.4xlarge VM (us-east-1) reading fr
 Amazon S3, and from S3 Express One Zone in the VM's own zone. Threshold query speedup
 over the best baseline, t2m:
 
-| Storage | Query code | 1–50% | 0.1% |
-|---|---|---|---|
-| S3 | as in the GCP run | 1.19–1.49x | 1.00x |
-| S3 | pipelined zone map reads | 1.53–1.99x | 2.25x |
-| S3 Express One Zone | pipelined zone map reads | 1.46–1.77x | 2.05x |
+| Selectivity | 0.1% | 1% | 10% | 50% |
+|---|---|---|---|---|
+| S3, first release | 1.6x | 1.3x | 1.1x | 1.2x |
+| S3, with pipelined, zero-copy reads | **2.4x** | **1.8x** | **1.4x** | **1.6x** |
+| S3 Express, first release | 1.3x | 1.2x | 1.1x | 1.2x |
+| S3 Express, with pipelined, zero-copy reads | **2.1x** | **1.6x** | **1.5x** | **1.6x** |
 
-S3 has a higher per-request latency than Cloud Storage, so at 0.1% selectivity, where a
-query issues many small reads, the code used for the GCP run only ties the best
-baseline. The pipelined query reads the zone map objects by key and plans and reads
-each one as soon as it arrives, which brings the lead back on every store. Aggregates,
-filtered aggregates and overhead give identical results on both clouds. Results are in
+For ws the pipelined, zero-copy reads are 1.4–2.3x faster than the best baseline on both
+stores. Unlike the GCP run, the baselines here also read without copying each response,
+so these numbers are not directly comparable with the table above.
+
+The newer query reads the zone map objects by key, plans and reads each one as soon
+as it arrives, and decodes each read in place instead of copying it, which together
+cut query time on S3 by 16–35%. Every version runs interleaved with the others, so
+they all see the same network. Aggregates, filtered aggregates and overhead give
+identical results on both clouds. Results are in
 [`experiments/results_aws/`](experiments/results_aws).
 
 ## Reproducing the paper

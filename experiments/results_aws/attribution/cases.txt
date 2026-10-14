@@ -1,0 +1,8 @@
+t2m 0.001 307.3660888671875 zstd_zm stores_chunks/t2m/64x64x128/zstd.zarr
+t2m 0.01 301.4148864746094 zshard_izm stores_zshard/t2m/64x16x32.zarr
+t2m 0.1 292.49176025390625 zshard_izm stores_zshard/t2m/64x16x32.zarr
+t2m 0.5 280.8170471191406 zstd_zm stores_chunks/t2m/64x128x256/zstd.zarr
+ws 0.001 19.129028154373373 zshard_izm stores_zshard/ws/64x16x32.zarr
+ws 0.01 15.414734840393066 zshard_izm stores_zshard/ws/64x16x32.zarr
+ws 0.1 9.62159252166748 zshard_izm stores_zshard/ws/16x16x16.zarr
+ws 0.5 3.9011287689208984 zstd_zm stores_chunks/ws/64x128x256/zstd.zarr

@@ -37,7 +37,7 @@ class _C:
         self.lib = ctypes.CDLL(str(so))
         self.lib.bc_count_gt.argtypes = [
             ctypes.c_void_p,
-            ctypes.c_char_p,
+            ctypes.c_void_p,
             ctypes.c_size_t,
             ctypes.c_void_p,
             ctypes.c_void_p,
@@ -54,7 +54,7 @@ class _C:
         self.lib.bc_count_f32.restype = ctypes.c_size_t
         self.lib.bc_decode_many.argtypes = [
             ctypes.c_void_p,
-            ctypes.c_char_p,
+            ctypes.c_void_p,
             ctypes.c_size_t,
             ctypes.c_void_p,
             ctypes.c_void_p,
@@ -66,13 +66,14 @@ class _C:
         self.dec = ctypes.cast(blosc.blosc_decompress_ctx, ctypes.c_void_p).value
 
     def blosc(self, data, offs, sizes, raw_nbytes, th):
+        src = np.frombuffer(data, np.uint8)  # bytes or a buffer view, no copy
         offs = np.ascontiguousarray(offs, np.uint64)
         sizes = np.ascontiguousarray(sizes, np.uint64)
         out = ctypes.c_size_t()
         code = self.lib.bc_count_gt(
             self.dec,
-            data,
-            len(data),
+            src.ctypes.data,
+            src.size,
             offs.ctypes.data,
             sizes.ctypes.data,
             len(offs),
@@ -85,13 +86,14 @@ class _C:
         return int(out.value)
 
     def decode_many(self, data, offs, sizes, raw_nbytes):
+        src = np.frombuffer(data, np.uint8)
         offs = np.ascontiguousarray(offs, np.uint64)
         sizes = np.ascontiguousarray(sizes, np.uint64)
         out = np.empty(len(offs) * raw_nbytes // 4, np.float32)
         code = self.lib.bc_decode_many(
             self.dec,
-            data,
-            len(data),
+            src.ctypes.data,
+            src.size,
             offs.ctypes.data,
             sizes.ctypes.data,
             len(offs),
@@ -155,7 +157,8 @@ async def stream(store, reqs, conc, work, missing_ok=False):
             if missing_ok and rng is None:
                 return 0, 0.0
             raise FileNotFoundError(key)
-        return await loop.run_in_executor(POOL, timed, buf.to_bytes(), item)
+        # a view of the response, like query.read_one, so every method skips the copy
+        return await loop.run_in_executor(POOL, timed, buf.as_numpy_array(), item)
 
     parts = await asyncio.gather(*(one(*r) for r in reqs))
     return sum(p[0] for p in parts), sum(p[1] for p in parts)
@@ -165,7 +168,8 @@ def chunk_counter(kind, raw_nbytes, th):
     c = lib()
     if kind == "zstd":
         return lambda data, _: c.blosc(data, [0], [len(data)], raw_nbytes, th)
-    return lambda data, _: c.f32(zfpy.decompress_numpy(data), th)
+    # zfpy only takes bytes, so copy here, on the worker thread
+    return lambda data, _: c.f32(zfpy.decompress_numpy(bytes(data)), th)
 
 
 def _keys(arr, coords):
