@@ -9,10 +9,10 @@
 
 **Make ZFP-compressed arrays queryable.**
 
-SkipZFP is a Zarr v3 codec for float32 scientific arrays. It stores data as
-[ZFP](https://github.com/LLNL/zfp) fixed-rate blocks plus a few bytes of bounds per
-block, so a query such as *count(x > T)* can tell which 4×4×4 blocks cannot match,
-skip them without reading them, and decode only the blocks that might.
+SkipZFP is a Zarr v3 codec for float32 scientific arrays. It compresses data with
+[ZFP](https://github.com/LLNL/zfp) in fixed-rate mode and keeps a few bytes of bounds
+for every 4×4×4 block, so a query such as *count(x > T)* can tell which blocks cannot
+match, skip them without reading them, and decode only those that might.
 
 <p align="center">
   <picture>
