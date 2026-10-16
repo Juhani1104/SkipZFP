@@ -27,7 +27,9 @@ from common import (
     VARS,
     load_era5,
     open_counted,
+    quantiles,
     query,
+    read_slabs,
     store_url,
 )
 
@@ -85,17 +87,24 @@ def one(url, method, th):
     print(json.dumps(out))
 
 
-def thresholds(raw, nt=None, step=64 * 16):
+def thresholds(raw, nt=None, step=64 * 16, cache=None):
+    """Thresholds for each selectivity and the exact count above each.
+
+    With cache, each variable is read through a memory map on disk, so it never has
+    to fit in memory.
+    """
     ths, truth = {}, {}
     for var in VARS:
-        a = load_era5(raw, var, nt)
-        ths[var] = [float(x) for x in np.quantile(a, [1 - s for s in SELECTIVITIES])]
+        a = load_era5(raw, var, nt, cache=cache)
+        ths[var] = [float(x) for x in quantiles(a, [1 - s for s in SELECTIVITIES])]
         truth[var] = [0] * len(SELECTIVITIES)
-        for s in range(0, a.shape[0], step):
-            blk = a[s : s + step].astype(np.float64)
+        for _, _, x in read_slabs(a, step):
+            blk = x.astype(np.float64)
             for i, t in enumerate(ths[var]):
                 truth[var][i] += int((blk > t).sum())
         del a
+        if cache:
+            Path(cache, f"{var}.npy").unlink()
         print(var, "thresholds", ths[var], flush=True)
     return ths, truth
 
@@ -119,8 +128,8 @@ def jobs_for(layouts, reps):
     return jobs
 
 
-def run(raw, root, out_path, reps, layouts, nt=None):
-    ths, truth = thresholds(raw, nt)
+def run(raw, root, out_path, reps, layouts, nt=None, cache=None):
+    ths, truth = thresholds(raw, nt, cache=cache)
     jobs = jobs_for(layouts, reps)
 
     def key(j):
@@ -163,5 +172,16 @@ if __name__ == "__main__":
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--layouts", default="k8t,k8")
     ap.add_argument("--nt", type=int)
+    ap.add_argument("--cache", help="directory for on-disk copies of the raw data")
     args = ap.parse_args()
-    run(args.raw, args.root, args.out, args.reps, args.layouts.split(","), args.nt)
+    if args.cache:
+        Path(args.cache).mkdir(parents=True, exist_ok=True)
+    run(
+        args.raw,
+        args.root,
+        args.out,
+        args.reps,
+        args.layouts.split(","),
+        args.nt,
+        args.cache,
+    )

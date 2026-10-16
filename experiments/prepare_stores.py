@@ -36,6 +36,7 @@ from common import (
     shard_index,
     skipzfp_codec,
     upload,
+    write_slabs,
 )
 
 SUITES = {
@@ -76,7 +77,7 @@ def write_skipzfp(path, a, layout):
         compressors=None,
         filters=None,
     )
-    z[:] = a
+    write_slabs(z, a)
     codec.write_meta(z, a, t_chunk=1 if layout == "k64t" else 16)
     return z
 
@@ -94,7 +95,7 @@ def write_chunked(path, a, fmt, chunk, tol):
     z = g.create_array(
         "data", shape=a.shape, dtype="float32", **format_kwargs(fmt, tol, chunk)
     )
-    z[:] = a
+    write_slabs(z, a)
     s = chunk_stats(a, chunk)
     st = g.create_array(
         "data_stats",
@@ -118,7 +119,7 @@ def write_sharded(path, a, inner):
         chunks=inner,
         compressors=lossless(),
     )
-    z[:] = a
+    write_slabs(z, a)
     grid = tuple(s // c for s, c in zip(a.shape, SHARD))
     n_inner = int(np.prod([s // i for s, i in zip(SHARD, inner)]))
     put(g, "data_stats", inner_stats(a, SHARD, inner))
@@ -138,7 +139,8 @@ def prepare(raw, dest, suite, tmp, nt=None, variables=VARS):
         print(sub, path.name, "done", flush=True)
 
     for var in variables:
-        a = load_era5(raw, var, nt)
+        # a memory map on disk, so a variable never has to fit in memory
+        a = load_era5(raw, var, nt, cache=tmp)
         print(var, a.shape, flush=True)
         for layout in spec["skipzfp"]:
             path = tmp / f"{layout}.zarr"
@@ -157,6 +159,7 @@ def prepare(raw, dest, suite, tmp, nt=None, variables=VARS):
             write_sharded(path, a, shape_of(tag))
             done(path, f"stores_zshard/{var}")
         del a
+        Path(tmp, f"{var}.npy").unlink()
     Path(tmp, f"tolerances_{suite}.json").write_text(json.dumps(tols))
     upload(Path(tmp, f"tolerances_{suite}.json"), dest)
     print("all stores ready", tols, flush=True)
