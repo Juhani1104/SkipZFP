@@ -127,16 +127,37 @@ static int decode_block(
     return ret == 0 ? SZ_ERR_ZFP : SZ_OK;
 }
 
+/* bytes of per-block 4-bit error codes in a record of n_block blocks */
+static size_t code_bytes(size_t n_block) {
+    return (n_block + 1u) / 2u;
+}
+
+/* error bound of block bid: the unit's eps, or eps * q / 15 when the record
+ * stores a 4-bit code q per block (low nibble first). The writer checks that
+ * this very expression covers the block's error, so it must not change. */
+static inline double block_error(float eps, const unsigned char* codes, size_t bid) {
+    unsigned q;
+
+    if (codes == NULL) {
+        return (double)eps;
+    }
+    q = (codes[bid / 2u] >> (4u * (bid % 2u))) & 15u;
+    return (double)eps * (double)q / 15.0;
+}
+
 /* classify the blocks of one metadata unit for lo < x <= hi:
- * 0 = OUT, 1 = IN, 2 = MAYBE */
+ * 0 = OUT, 1 = IN, 2 = MAYBE. has_codes says whether the record ends with
+ * per-block error codes. */
 static void classify_unit(
     const unsigned char* cm,
     size_t n_block,
+    int has_codes,
     double lo,
     double hi,
     unsigned char* states
 ) {
     const unsigned char* offs = cm + 3u * sizeof(float);
+    const unsigned char* codes = has_codes ? offs + 2u * n_block : NULL;
     float cmin;
     float cmax;
     float eps;
@@ -153,6 +174,7 @@ static void classify_unit(
     for (size_t bid = 0; bid < n_block; bid++) {
         double bmin;
         double bmax;
+        double e = block_error(eps, codes, bid);
         unsigned char state = 2;
 
         if (span == 0.0) {
@@ -164,9 +186,9 @@ static void classify_unit(
         }
 
         /* predicate lo < x <= hi; either bound may be infinite */
-        if (bmin - (double)eps > lo && bmax + (double)eps <= hi) {
+        if (bmin - e > lo && bmax + e <= hi) {
             state = 1;
-        } else if (bmax + (double)eps <= lo || bmin - (double)eps > hi) {
+        } else if (bmax + e <= lo || bmin - e > hi) {
             state = 0;
         }
 
@@ -211,6 +233,7 @@ static int plan_blocks(
     size_t n_in = 0;
     size_t n_out = 0;
     int workers;
+    int has_codes;
 
     if (meta == NULL || maybe_chunks == NULL || maybe_blocks == NULL ||
         out_maybe == NULL || out_in == NULL || out_out == NULL) {
@@ -223,10 +246,13 @@ static int plan_blocks(
 
     if (sx == 0 || sy == 0 || sz == 0 || ux % sx || uy % sy || uz % sz ||
         blocks_per_unit == 0 ||
-        meta_size != 3u * sizeof(float) + 2u * blocks_per_unit) {
+        (meta_size != 3u * sizeof(float) + 2u * blocks_per_unit &&
+         meta_size !=
+             3u * sizeof(float) + 2u * blocks_per_unit + code_bytes(blocks_per_unit))) {
         return SZ_ERR_ARG;
     }
 
+    has_codes = meta_size != 3u * sizeof(float) + 2u * blocks_per_unit;
     gx = ux / sx;
     gy = uy / sy;
     gz = uz / sz;
@@ -274,7 +300,9 @@ static int plan_blocks(
             size_t uid = (ix * uy + iy) * uz + iz;
             unsigned char* su = st + sub * blocks_per_unit;
 
-            classify_unit(meta + uid * meta_size, blocks_per_unit, lo, hi, su);
+            classify_unit(
+                meta + uid * meta_size, blocks_per_unit, has_codes, lo, hi, su
+            );
         }
 
         for (size_t b = 0; b < blocks_per_chunk; b++) {

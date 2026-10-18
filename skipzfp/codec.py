@@ -222,6 +222,11 @@ class SkipZFPCodec(ArrayBytesCodec):
             keep the whole chunk as one unit. Each unit is encoded on its
             own with its own entry in the zone map, which keeps chunks large
             (fewer objects) while the zone map stays fine-grained.
+        block_error_bits: 0 to keep one error bound per unit, or 4 to also
+            store a 4-bit error bound per block in the zone map, which costs
+            half a byte per block but lets queries classify each block with
+            its own error instead of the largest one in its unit. Only
+            single-layer arrays support 4.
 
     Example:
         >>> group = zarr.open_group("demo.zarr", mode="w")
@@ -242,6 +247,7 @@ class SkipZFPCodec(ArrayBytesCodec):
     layers: tuple[float, ...] = ()
     block_order: tuple[int, ...] = (0, 1, 2)
     sub_chunk: tuple[int, ...] = ()
+    block_error_bits: int = 0
 
     def __post_init__(self) -> None:
         if self.rate <= 0:
@@ -267,6 +273,13 @@ class SkipZFPCodec(ArrayBytesCodec):
         ):
             raise ValueError("sub_chunk must be three positive multiples of block_dim")
         object.__setattr__(self, "sub_chunk", sub_chunk)
+
+        bits = int(self.block_error_bits)
+        if bits not in (0, 4):
+            raise ValueError("block_error_bits must be 0 or 4")
+        if bits and len(layers) > 1:
+            raise ValueError("block_error_bits needs a single layer")
+        object.__setattr__(self, "block_error_bits", bits)
 
     def unit(self, shape: tuple[int, ...]) -> tuple[int, ...]:
         """Return the shape of one unit in a chunk of the given shape."""
@@ -305,6 +318,7 @@ class SkipZFPCodec(ArrayBytesCodec):
             layers=tuple(cfg.get("layers") or ()),
             block_order=tuple(cfg.get("block_order") or (0, 1, 2)),
             sub_chunk=tuple(cfg.get("sub_chunk") or ()),
+            block_error_bits=int(cfg.get("block_error_bits", 0)),
         )
 
     def to_dict(self) -> dict[str, JSON]:
@@ -316,6 +330,8 @@ class SkipZFPCodec(ArrayBytesCodec):
                 "layers": list(self.layers),
                 "block_order": list(self.block_order),
                 "sub_chunk": list(self.sub_chunk),
+                # written only when used, so existing arrays keep their metadata
+                **({"block_error_bits": 4} if self.block_error_bits else {}),
             },
         }
 
@@ -490,9 +506,51 @@ def meta_size(codec: SkipZFPCodec, chunk: tuple[int, ...]) -> int:
 
     A record holds the unit's min and max as two float32, one float32 error
     bound per layer, and each block's quantized min and max as two uint8.
+    With block_error_bits = 4 it ends with a 4-bit error code per block, two
+    blocks per byte.
     """
     n = int(np.prod([s // codec.block_dim for s in chunk]))
-    return 8 + 4 * len(codec.layers) + 2 * n
+    codes = (n + 1) // 2 if codec.block_error_bits else 0
+    return 8 + 4 * len(codec.layers) + 2 * n + codes
+
+
+def block_error_codes(
+    data: np.ndarray, rec: np.ndarray, eps: float, block_dim: int = 4
+) -> np.ndarray:
+    """Return the 4-bit error code of each block of a unit, in C order.
+
+    Code q bounds the block's largest error |data - rec| by eps * q / 15. It is
+    rounded up, and then checked with the very expression the query planner
+    uses, so the bound never falls short of the error.
+    """
+    b = tuple(s // block_dim for s in data.shape)
+    err = np.abs(data.astype(np.float64) - rec.astype(np.float64))
+    err = err.reshape(b[0], block_dim, b[1], block_dim, b[2], block_dim)
+    err = err.max(axis=(1, 3, 5)).reshape(-1)
+    e = float(np.float32(eps))
+    if e == 0.0:
+        if err.any():
+            raise ValueError("a block has an error but the unit's bound is 0")
+        return np.zeros(err.size, np.uint8)
+    q = np.minimum(np.ceil(15.0 * err / e), 15.0)
+    short = e * q / 15.0 < err  # same order of operations as the C planner
+    q[short] += 1
+    if (q > 15).any() or (e * q / 15.0 < err).any():
+        raise ValueError("the unit's error bound does not cover a block")
+    return q.astype(np.uint8)
+
+
+def pack_codes(q: np.ndarray) -> np.ndarray:
+    """Pack 4-bit codes two per byte, the first one in the low nibble."""
+    if q.size % 2:
+        q = np.append(q, np.uint8(0))
+    return (q[0::2] | (q[1::2] << 4)).astype(np.uint8)
+
+
+def unpack_codes(packed: np.ndarray, n: int) -> np.ndarray:
+    """Undo pack_codes, returning n codes."""
+    p = np.asarray(packed, np.uint8)
+    return np.stack([p & 15, p >> 4], axis=-1).reshape(*p.shape[:-1], -1)[..., :n]
 
 
 META_ATTR = "skipzfp_meta"
@@ -584,17 +642,30 @@ def write_meta(
     )
 
     # One record per unit: min and max, each layer's error bound, then the
-    # per-block offsets in storage order. Min, max and offsets depend only on
-    # the data, so taking them from the last layer's result is enough.
+    # per-block offsets in storage order, then with block_error_bits the
+    # per-block error codes in the same order. Min, max and offsets depend
+    # only on the data, so taking them from the last layer's result is enough.
     def one(idx: tuple[int, ...]) -> np.ndarray:
         sl = tuple(slice(i * u, (i + 1) * u) for i, u in zip(idx, unit))
-        per = [native().meta(data[sl], r, codec.block_dim) for r in codec.layers]
+        x = np.ascontiguousarray(data[sl], dtype=np.float32)
+        per = [native().meta(x, r, codec.block_dim) for r in codec.layers]
         offs = per[-1][12:].reshape(-1, 2)
         ranked = np.empty_like(offs)
         ranked[rank] = offs
-        return np.concatenate(
-            [per[-1][:8], *(m[8:12] for m in per), ranked.reshape(-1)]
-        )
+        parts = [per[-1][:8], *(m[8:12] for m in per), ranked.reshape(-1)]
+        if codec.block_error_bits:
+            rec = native().decode(
+                native().encode(x, codec.rate, codec.block_dim),
+                unit,
+                codec.rate,
+                codec.block_dim,
+            )
+            eps = float(np.frombuffer(per[-1][8:12].tobytes(), np.float32)[0])
+            q = block_error_codes(x, rec, eps, codec.block_dim)
+            codes = np.empty_like(q)
+            codes[rank] = q
+            parts.append(pack_codes(codes))
+        return np.concatenate(parts)
 
     idxs = list(np.ndindex(*grid))
     with ThreadPoolExecutor(threads) as ex:

@@ -130,14 +130,19 @@ def block_eps(
     chunk_ids: np.ndarray,
     block_ids: np.ndarray,
 ) -> np.ndarray:
-    """Return the error bound of the unit holding each (chunk, block).
+    """Return the error bound of each (chunk, block).
 
-    meta holds single-layer records, as plan_meta returns them, so the error
-    bound is the float at bytes 8 to 12 of each record. Blocks are numbered
-    unit by unit inside a chunk, as in the C planner.
+    meta holds single-layer records, as plan_meta returns them, so the unit's
+    error bound is the float at bytes 8 to 12 of each record. When the
+    records end with 4-bit codes, a block's bound is eps * q / 15, computed as
+    the C planner does. Blocks are numbered unit by unit inside a chunk, as
+    in the C planner.
     """
     rec = np.ascontiguousarray(meta, dtype=np.uint8).reshape(-1, meta_size)
     eps = np.ascontiguousarray(rec[:, 8:12]).view(np.float32).reshape(-1)
+    n_codes = meta_size - 12 - 2 * blocks_per_unit
+    if n_codes not in (0, (blocks_per_unit + 1) // 2):
+        raise ValueError("zone map records have an unexpected size")
 
     _, gy, gz = (int(g) for g in grid_shape)
     sx, sy, sz = (int(s) for s in subs)
@@ -147,7 +152,18 @@ def block_eps(
     ix = (c // (gy * gz)) * sx + sub // (sy * sz)
     iy = ((c // gz) % gy) * sy + (sub // sz) % sy
     iz = (c % gz) * sz + sub % sz
-    return eps[(ix * uy + iy) * uz + iz]
+    uid = (ix * uy + iy) * uz + iz
+    if not n_codes:
+        return eps[uid]
+    pos = block_ids.astype(np.int64) % blocks_per_unit
+    codes = rec[uid, 12 + 2 * blocks_per_unit + pos // 2]
+    q = (codes >> (4 * (pos % 2))) & 15
+    bound = eps[uid].astype(np.float64) * q.astype(np.float64) / 15.0
+    # the C aggregate takes a float32 bound, so round it up to stay safe
+    out = bound.astype(np.float32)
+    low = out.astype(np.float64) < bound
+    out[low] = np.nextafter(out[low], np.float32(np.inf))
+    return out
 
 
 async def stream_aggregate(
