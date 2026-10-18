@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import itertools
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, ClassVar, Self
@@ -554,6 +556,10 @@ def unpack_codes(packed: np.ndarray, n: int) -> np.ndarray:
 
 
 META_ATTR = "skipzfp_meta"
+# what the zone map was built from: the codec, the shape and chunks, and the CRC32
+# of every stored chunk object, so a query can refuse a zone map built for another
+# layout and check_meta can find chunks rewritten after write_meta
+META_SOURCE_ATTR = "skipzfp_meta_source"
 # units along the first axis in each zone map object, so a query can compute the
 # object keys and sizes without opening the zone map's zarr.json
 META_T_CHUNK_ATTR = "skipzfp_meta_t_chunk"
@@ -590,7 +596,11 @@ def write_meta(
 
     The zone map is saved as a uint8 array next to arr, replacing any
     existing one at the same path, and arr's attributes record its path and
-    t_chunk so a query can read it without opening it as an array.
+    t_chunk so a query can read it without opening it as an array. They also
+    record what it was built from: the codec, shape and chunks, which every
+    query checks, and the CRC32 of every chunk object, which check_meta uses
+    to find chunks written afterwards. The zone map holds only for the payload
+    as written now: after writing any chunk again, run write_meta again.
 
     Args:
         arr: An array written with SkipZFPCodec, inside a group.
@@ -672,5 +682,81 @@ def write_meta(
         rows = list(ex.map(one, idxs))
 
     meta[...] = np.stack(rows).reshape(*grid, size)
-    arr.update_attributes({META_ATTR: path, META_T_CHUNK_ATTR: t_chunk})
+    source = dict(
+        codec=codec.to_dict(),
+        shape=list(arr.shape),
+        chunks=list(chunk),
+        chunk_crc32=chunk_crc32(arr),
+    )
+    arr.update_attributes(
+        {META_ATTR: path, META_T_CHUNK_ATTR: t_chunk, META_SOURCE_ATTR: source}
+    )
     return meta
+
+
+def chunk_crc32(arr: zarr.Array, concurrency: int = 16) -> list[int | None]:
+    """CRC32 of every stored chunk object of arr, in C order, None if missing.
+
+    At most `concurrency` chunks are read at once, and each is dropped once its
+    CRC is taken, so memory stays near concurrency chunks, not the whole array.
+    """
+    from zarr.core.buffer import default_buffer_prototype
+    from zarr.core.sync import sync
+
+    grid = [s // c for s, c in zip(arr.shape, arr.metadata.chunk_grid.chunk_shape)]
+    prefix = arr.store_path.path.strip("/")
+    store = arr.store_path.store
+
+    async def one(coord: tuple[int, ...], sem: asyncio.Semaphore) -> int | None:
+        key = arr.metadata.encode_chunk_key(coord)
+        async with sem:
+            buf = await store.get(
+                f"{prefix}/{key}" if prefix else key,
+                prototype=default_buffer_prototype(),
+            )
+            return None if buf is None else zlib.crc32(buf.as_numpy_array())
+
+    async def run() -> list[int | None]:
+        sem = asyncio.Semaphore(concurrency)
+        coords = list(itertools.product(*(range(g) for g in grid)))
+        return list(await asyncio.gather(*(one(c, sem) for c in coords)))
+
+    return sync(run())
+
+
+def check_meta(arr: zarr.Array) -> list[tuple[int, ...]]:
+    """Return the chunks whose stored bytes changed since write_meta built the zone map.
+
+    The zone map describes the payload as it was when write_meta ran, so any
+    chunk written afterwards, as by arr[...] = new_values, makes it stale: a
+    query could then skip or count blocks by bounds that no longer hold. This
+    reads every chunk object and compares its CRC32 with the one write_meta
+    recorded. An empty list means the zone map still matches the payload.
+
+    Raises:
+        ValueError: If arr has no zone map, or one built before write_meta
+            recorded its source, or for another layout.
+    """
+    source = arr.attrs.get(META_SOURCE_ATTR)
+    if not source:
+        raise ValueError("no zone map source recorded; run write_meta again")
+    check_source(arr, source)
+    grid = [s // c for s, c in zip(arr.shape, arr.metadata.chunk_grid.chunk_shape)]
+    coords = list(itertools.product(*(range(g) for g in grid)))
+    now = chunk_crc32(arr)
+    return [c for c, a, b in zip(coords, source["chunk_crc32"], now) if a != b]
+
+
+def check_source(arr: zarr.Array, source: dict[str, Any]) -> None:
+    """Raise ValueError if the zone map was built for another codec, shape or chunks."""
+    codec = find_codec(arr)
+    chunk = [int(x) for x in arr.metadata.chunk_grid.chunk_shape]
+    if (
+        source.get("codec") != codec.to_dict()
+        or source.get("shape") != list(arr.shape)
+        or source.get("chunks") != chunk
+    ):
+        raise ValueError(
+            "the zone map was built for another codec, shape or chunk layout; "
+            "run write_meta again"
+        )

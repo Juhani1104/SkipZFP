@@ -22,7 +22,14 @@ from zarr.core.buffer import default_buffer_prototype
 from zarr.core.sync import sync
 
 from ._native import check, load_library
-from .codec import META_ATTR, META_T_CHUNK_ATTR, find_codec, meta_size
+from .codec import (
+    META_ATTR,
+    META_SOURCE_ATTR,
+    META_T_CHUNK_ATTR,
+    check_source,
+    find_codec,
+    meta_size,
+)
 from .codec import native as codec_native
 
 
@@ -850,6 +857,9 @@ def meta_objects(arr: zarr.Array, lt: _Layout) -> _MetaObjects | None:
     path = arr.attrs.get(META_ATTR)
     if not path:
         raise ValueError("array has no metadata; run codec.write_meta first")
+    source = arr.attrs.get(META_SOURCE_ATTR)
+    if source:  # zone maps written before the source was recorded are trusted
+        check_source(arr, source)
 
     t_chunk = arr.attrs.get(META_T_CHUNK_ATTR)
     if t_chunk is None:
