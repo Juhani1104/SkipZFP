@@ -111,7 +111,8 @@
    "count_query_payload_requests": 41,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "t2m_0.0001_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "t2m",
@@ -225,7 +226,8 @@
    "count_query_payload_requests": 52,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "t2m_0.001_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "t2m",
@@ -339,7 +341,8 @@
    "count_query_payload_requests": 75,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "t2m_0.01_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "t2m",
@@ -453,7 +456,8 @@
    "count_query_payload_requests": 111,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "t2m_0.05_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "t2m",
@@ -567,7 +571,8 @@
    "count_query_payload_requests": 125,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "t2m_0.1_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "t2m",
@@ -681,7 +686,8 @@
    "count_query_payload_requests": 137,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "t2m_0.2_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "t2m",
@@ -795,7 +801,8 @@
    "count_query_payload_requests": 153,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "t2m_0.5_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "ws",
@@ -909,7 +916,8 @@
    "count_query_payload_requests": 47,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "ws_0.0001_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "ws",
@@ -1023,7 +1031,8 @@
    "count_query_payload_requests": 148,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "ws_0.001_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "ws",
@@ -1137,7 +1146,8 @@
    "count_query_payload_requests": 256,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "ws_0.01_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "ws",
@@ -1251,7 +1261,8 @@
    "count_query_payload_requests": 202,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "ws_0.05_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "ws",
@@ -1365,7 +1376,8 @@
    "count_query_payload_requests": 144,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "ws_0.1_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "ws",
@@ -1479,7 +1491,8 @@
    "count_query_payload_requests": 137,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "ws_0.2_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  },
  {
   "var": "ws",
@@ -1593,6 +1606,7 @@
    "count_query_payload_requests": 137,
    "full_payload_bytes": 287309824,
    "read_blocks_file": "ws_0.5_read_blocks.npy"
-  }
+  },
+  "run_id": "20261018T170118-ec7a6a"
  }
 ]

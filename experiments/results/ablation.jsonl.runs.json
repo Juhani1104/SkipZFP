@@ -1,0 +1,266 @@
+{
+ "20261018T140945-b1c830": {
+  "started": "2026-10-18T14:09:45Z",
+  "source": {
+   "commit": "7c0aa6731507fb29c690019af3e1f26c0ff31c73",
+   "dirty": false,
+   "diff_sha256": null,
+   "shipped": "git archive"
+  },
+  "machine": {
+   "host": "skipzfp-vm",
+   "gce_machine_type": "n2-standard-16",
+   "gce_zone": "us-central1-b",
+   "cpu": "Intel(R) Xeon(R) CPU @ 2.80GHz",
+   "cpus": 16,
+   "mem_kb": 65854796,
+   "kernel": "6.1.0-53-cloud-amd64"
+  },
+  "calibration": {
+   "encode_chunk_s": 0.0735098779987311,
+   "decode_chunk_s": 0.03737840500070888,
+   "sum_512mb_s": 0.04383484100071655
+  },
+  "packages": {
+   "python": "3.11.2",
+   "numpy": "2.4.6",
+   "zarr": "3.1.6",
+   "obstore": "0.11.1",
+   "zfpy": "1.0.1",
+   "numcodecs": "0.16.5",
+   "skipzfp": "0.1.0",
+   "libzfp": "zfp version 1.0.1 (December 15, 2023)"
+  },
+  "data": {
+   "path": "/home/lucas710542/skipzfp_data/era5_2000_2009.zarr",
+   "attrs": {
+    "source": "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3",
+    "years": "2000-2009",
+    "time_unit": "hours since 1970-01-01"
+   },
+   "arrays": {
+    "t2m": {
+     "shape": [
+      87672,
+      128,
+      256
+     ],
+     "dtype": "float32"
+    },
+    "time": {
+     "shape": [
+      87672
+     ],
+     "dtype": "int64"
+    },
+    "ws": {
+     "shape": [
+      87672,
+      128,
+      256
+     ],
+     "dtype": "float32"
+    }
+   },
+   "time_range": [
+    "2000-01-01T00",
+    "2009-12-31T23"
+   ],
+   "fingerprint_sha256": "6df2dc7d0b2c1b22921a29f1278e591cd06cf2a59944a9020bacadab1aecba20"
+  },
+  "fields": {
+   "seconds": "wall time of the query, from the first metadata read to the answer",
+   "open_seconds": "wall time to open the array (zarr.json), before the query",
+   "open_requests": "requests made while opening the array",
+   "metadata_seconds": "wall time until the zone map or indexes were read",
+   "planning_seconds": "planning time; with the pipeline, summed over objects",
+   "payload_seconds": "wall time from the first payload read to the last decode",
+   "decode_seconds": "decode time summed over every read, across threads, so it can exceed the wall time and must not be stacked with the others",
+   "requests": "requests made by the query, counted by a wrapper store",
+   "bytes": "bytes returned to the query, counted by a wrapper store",
+   "peak_rss_kb": "peak resident memory of the measuring process (VmHWM), page cache not included",
+   "cgroup_peak_bytes": "memory.peak of the job's cgroup, page cache included",
+   "peak_inflight_bytes": "most payload bytes reserved at once, from a read's start until its blocks are decoded: an upper bound on payload buffers, not memory used, since reads still downloading count too; see peak_rss_kb for memory"
+  },
+  "script": "ablation",
+  "reps": 20,
+  "tail_reps": 30,
+  "configs": {
+   "default": [
+    "none",
+    "skipzfp",
+    "k8t",
+    {}
+   ],
+   "pipeline_off": [
+    "pipeline",
+    "skipzfp",
+    "k8t",
+    {
+     "pipeline": false
+    }
+   ],
+   "zero_copy_off": [
+    "zero_copy",
+    "skipzfp",
+    "k8t",
+    {
+     "zero_copy": false
+    }
+   ],
+   "gap_0": [
+    "merge_gap",
+    "skipzfp",
+    "k8t",
+    {
+     "merge_gap_blocks": 0
+    }
+   ],
+   "gap_64k": [
+    "merge_gap",
+    "skipzfp",
+    "k8t",
+    {
+     "merge_gap_blocks": 1000
+    }
+   ],
+   "gap_850k": [
+    "merge_gap",
+    "skipzfp",
+    "k8t",
+    {
+     "merge_gap_blocks": 13281
+    }
+   ],
+   "order_c": [
+    "block_order",
+    "skipzfp",
+    "k8",
+    {}
+   ],
+   "bits4": [
+    "summary_precision",
+    "skipzfp",
+    "k8t-b4",
+    {}
+   ],
+   "no_pruning": [
+    "pruning",
+    "fullscan_skipzfp",
+    "k8t",
+    {}
+   ],
+   "avg": [
+    "operator",
+    "skipzfp",
+    "k8t",
+    {
+     "op": "avg"
+    }
+   ],
+   "avg_bits4": [
+    "summary_precision",
+    "skipzfp",
+    "k8t-b4",
+    {
+     "op": "avg"
+    }
+   ],
+   "avg_pipeline_off": [
+    "pipeline",
+    "skipzfp",
+    "k8t",
+    {
+     "op": "avg",
+     "pipeline": false
+    }
+   ],
+   "meta_zarr": [
+    "zone_map_read",
+    "skipzfp",
+    "k8t",
+    {
+     "pipeline": false,
+     "meta_by_key": false
+    }
+   ],
+   "trace_pipeline_on": [
+    "timeline",
+    "skipzfp",
+    "k8t",
+    {
+     "trace": true
+    }
+   ],
+   "trace_pipeline_off": [
+    "timeline",
+    "skipzfp",
+    "k8t",
+    {
+     "trace": true,
+     "pipeline": false
+    }
+   ],
+   "zshard16_gap_0": [
+    "baseline_merge_gap",
+    "zshard_izm",
+    "16x16x16",
+    {
+     "gap_bytes": 0
+    }
+   ],
+   "zshard16_gap_256k": [
+    "baseline_merge_gap",
+    "zshard_izm",
+    "16x16x16",
+    {
+     "gap_bytes": 256000
+    }
+   ],
+   "zshard16_gap_850k": [
+    "baseline_merge_gap",
+    "zshard_izm",
+    "16x16x16",
+    {
+     "gap_bytes": 850000
+    }
+   ],
+   "zshard64_gap_0": [
+    "baseline_merge_gap",
+    "zshard_izm",
+    "64x16x32",
+    {
+     "gap_bytes": 0
+    }
+   ],
+   "zshard64_gap_256k": [
+    "baseline_merge_gap",
+    "zshard_izm",
+    "64x16x32",
+    {
+     "gap_bytes": 256000
+    }
+   ],
+   "zshard64_gap_850k": [
+    "baseline_merge_gap",
+    "zshard_izm",
+    "64x16x32",
+    {
+     "gap_bytes": 850000
+    }
+   ]
+  },
+  "reference": {
+   "zshard16_gap_0": "zshard16_gap_850k",
+   "zshard16_gap_256k": "zshard16_gap_850k",
+   "zshard16_gap_850k": "zshard16_gap_850k",
+   "zshard64_gap_0": "zshard64_gap_850k",
+   "zshard64_gap_256k": "zshard64_gap_850k",
+   "zshard64_gap_850k": "zshard64_gap_850k",
+   "avg_bits4": "avg",
+   "avg_pipeline_off": "avg",
+   "meta_zarr": "pipeline_off",
+   "trace_pipeline_off": "trace_pipeline_on"
+  }
+ }
+}

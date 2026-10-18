@@ -115,7 +115,10 @@ step_sensitivity() {
 step_local() {
     cd "$EXP"
     "$PY" exp3_aggregate.py "$DATA/era5_2000.zarr" "$OUT/exp3_aggregate.json"
-    "$PY" exp4_filtered_aggregate.py "$DATA/era5_2000.zarr" "$OUT/exp4_filtered_aggregate.json"
+    # exp4 builds its own stores to read from; keep them, and the blocks each query
+    # read, with the data rather than among the results
+    "$PY" exp4_filtered_aggregate.py "$DATA/era5_2000.zarr" "$OUT/exp4_filtered_aggregate.json" \
+        --stores "$DATA/exp4_stores"
     "$PY" exp5_overhead.py "$OUT/exp5_overhead.json"
 }
 
