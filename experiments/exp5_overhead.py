@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import zarr
 
-from common import codec
+from common import codec, start_run
 
 RATES = [2, 4, 8, 12, 16]
 CHUNK_3D = (64, 16, 32)
@@ -54,6 +54,7 @@ def measured_3d(rate, tmp):
 
 
 def main(out):
+    run_id = start_run(out, script="exp5")
     rows = []
     tmp = tempfile.mkdtemp()
     try:
@@ -81,6 +82,8 @@ def main(out):
             f"{r['rate']:>3} bpv | 3D {r['meta_3d']} / {r['payload_3d']} = "
             f"{100 * r['overhead_3d']:.2f}% | 2D {100 * r['overhead_2d']:.2f}%"
         )
+    for row in rows:
+        row["run_id"] = run_id
     Path(out).write_text(json.dumps(rows, indent=2))
 
 

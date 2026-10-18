@@ -1,0 +1,89 @@
+{
+ "20261018T165220-0c7b75": {
+  "started": "2026-10-18T16:52:20Z",
+  "source": {
+   "commit": "7c0aa6731507fb29c690019af3e1f26c0ff31c73",
+   "dirty": false,
+   "diff_sha256": null,
+   "shipped": "git archive"
+  },
+  "machine": {
+   "host": "skipzfp-vm",
+   "gce_machine_type": "n2-standard-16",
+   "gce_zone": "us-central1-b",
+   "cpu": "Intel(R) Xeon(R) CPU @ 2.80GHz",
+   "cpus": 16,
+   "mem_kb": 65854796,
+   "kernel": "6.1.0-53-cloud-amd64"
+  },
+  "calibration": {
+   "encode_chunk_s": 0.07456141799775651,
+   "decode_chunk_s": 0.03822544799913885,
+   "sum_512mb_s": 0.04435437199936132
+  },
+  "packages": {
+   "python": "3.11.2",
+   "numpy": "2.4.6",
+   "zarr": "3.1.6",
+   "obstore": "0.11.1",
+   "zfpy": "1.0.1",
+   "numcodecs": "0.16.5",
+   "skipzfp": "0.1.0",
+   "libzfp": "zfp version 1.0.1 (December 15, 2023)"
+  },
+  "data": {
+   "path": "/home/lucas710542/skipzfp_data/era5_2000.zarr",
+   "attrs": {
+    "source": "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3",
+    "years": "2000-2000",
+    "time_unit": "hours since 1970-01-01"
+   },
+   "arrays": {
+    "t2m": {
+     "shape": [
+      8784,
+      128,
+      256
+     ],
+     "dtype": "float32"
+    },
+    "time": {
+     "shape": [
+      8784
+     ],
+     "dtype": "int64"
+    },
+    "ws": {
+     "shape": [
+      8784,
+      128,
+      256
+     ],
+     "dtype": "float32"
+    }
+   },
+   "time_range": [
+    "2000-01-01T00",
+    "2000-12-31T23"
+   ],
+   "fingerprint_sha256": "b9dab6b2daf22810ad56d3d7f0ac7b561e86297bb39f0908faf1c795b44b9144"
+  },
+  "fields": {
+   "seconds": "wall time of the query, from the first metadata read to the answer",
+   "open_seconds": "wall time to open the array (zarr.json), before the query",
+   "open_requests": "requests made while opening the array",
+   "metadata_seconds": "wall time until the zone map or indexes were read",
+   "planning_seconds": "planning time; with the pipeline, summed over objects",
+   "payload_seconds": "wall time from the first payload read to the last decode",
+   "decode_seconds": "decode time summed over every read, across threads, so it can exceed the wall time and must not be stacked with the others",
+   "requests": "requests made by the query, counted by a wrapper store",
+   "bytes": "bytes returned to the query, counted by a wrapper store",
+   "peak_rss_kb": "peak resident memory of the measuring process (VmHWM), page cache not included",
+   "cgroup_peak_bytes": "memory.peak of the job's cgroup, page cache included",
+   "peak_inflight_bytes": "most payload bytes reserved at once, from a read's start until its blocks are decoded: an upper bound on payload buffers, not memory used, since reads still downloading count too; see peak_rss_kb for memory"
+  },
+  "script": "sensitivity",
+  "root": "gs://skipzfp-511820-data/skipzfp",
+  "reps": 5
+ }
+}

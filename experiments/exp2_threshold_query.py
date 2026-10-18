@@ -2,7 +2,12 @@
 
 usage: python exp2_threshold_query.py run <raw.zarr> <root> <out.jsonl> [--reps 5]
                                           [--layouts k8t,k8] [--nt N]
-       python exp2_threshold_query.py one <url> <method> <threshold>
+       python exp2_threshold_query.py one <url> <method> <threshold> [<options>]
+
+<options> is a JSON object for SkipZFP: "op" ("count" or "avg") plus any
+QueryOptions field, such as {"pipeline": false}; for zshard_izm, "gap_bytes", the
+merge gap of its reads (default 850 KB). Each row records its run_id;
+<out.jsonl>.runs.json holds the code, machine, packages and data of each run.
 
 <root> holds the stores built by `prepare_stores.py --suite threshold`. Every
 measurement runs in a fresh process; jobs are shuffled so methods interleave, and a
@@ -10,6 +15,7 @@ rerun skips jobs already in <out.jsonl>.
 """
 
 import argparse
+import dataclasses
 import json
 import random
 import subprocess
@@ -19,6 +25,8 @@ from pathlib import Path
 
 import numpy as np
 import zarr
+
+from skipzfp import aggregate_gt
 
 import baselines
 from common import (
@@ -30,6 +38,7 @@ from common import (
     quantiles,
     query,
     read_slabs,
+    start_run,
     store_url,
 )
 
@@ -50,21 +59,72 @@ FULL_SCANS = [
 ]
 
 
-def one(url, method, th):
+def peak_rss_kb():
+    """Peak resident memory of this process, from VmHWM in /proc/self/status.
+
+    Not ru_maxrss, which Linux carries over from the parent across fork and exec,
+    so a job started by a large parent would report the parent's peak.
+    """
+    for line in open("/proc/self/status"):
+        if line.startswith("VmHWM:"):
+            return int(line.split()[1])
+    return None
+
+
+def cgroup_memory():
+    """Peak and current memory of this process's cgroup, page cache included.
+
+    memory.peak counts page cache as well as anonymous memory, unlike ru_maxrss,
+    so the file and anon split at the end says how much was cache. Returns {}
+    outside a cgroup v2 memory controller.
+    """
+    try:
+        path = open("/proc/self/cgroup").read().strip().split("::")[-1]
+        d = Path("/sys/fs/cgroup" + path)
+        stat = dict(line.split() for line in open(d / "memory.stat"))
+        return dict(
+            cgroup_peak_bytes=int((d / "memory.peak").read_text()),
+            cgroup_max=(d / "memory.max").read_text().strip(),
+            cgroup_file_bytes=int(stat["file"]),
+            cgroup_anon_bytes=int(stat["anon"]),
+        )
+    except (OSError, KeyError, ValueError):
+        return {}
+
+
+def skipzfp_options(opts):
+    """QueryOptions for exp2: the defaults below, overridden by opts."""
+    base = dict(
+        request_concurrency=CONCURRENCY, merge_gap_blocks=SKIPZFP_GAP_BYTES // 64
+    )
+    return query.QueryOptions(**{**base, **opts})
+
+
+def one(url, method, th, opts=None):
+    """Measure one query in this fresh process and print one JSON line.
+
+    Opening the array, and a baseline's zone map and shard index arrays, is
+    timed and counted on its own, then a request for zarr.json opens a
+    connection, and only then the query is measured.
+    """
+    opts = dict(opts or {})
+    op = opts.pop("op", "count")
     zarr.config.set({"async.concurrency": CONCURRENCY})
+    t0 = time.perf_counter()
     arr, store = open_counted(url)
+    side = zarr.core.sync.sync(baselines.open_sides(arr, method))
+    open_out = dict(
+        open_seconds=time.perf_counter() - t0,
+        open_requests=store.requests,
+        open_bytes=store.bytes,
+    )
     zarr.core.sync.sync(store.exists("zarr.json"))
     store.requests = store.bytes = 0
     sync = zarr.core.sync.sync
     if method == "skipzfp":
-        r = query.query_gt(
-            arr,
-            th,
-            options=query.QueryOptions(
-                request_concurrency=CONCURRENCY,
-                merge_gap_blocks=SKIPZFP_GAP_BYTES // 64,
-            ),
-        )
+        options = skipzfp_options(opts)
+        run = aggregate_gt if op == "avg" else query.query_gt
+        r = run(arr, th, options=options)
         out = dict(
             seconds=r.total_seconds,
             count=r.count,
@@ -75,19 +135,44 @@ def one(url, method, th):
             planning_seconds=r.planning_seconds,
             payload_seconds=r.payload_read_seconds,
             decode_seconds=r.decode_seconds,
+            payload_bytes=r.payload_bytes_read,
+            useful_payload_bytes=r.useful_payload_bytes,
+            metadata_bytes=r.metadata_bytes_read,
+            peak_inflight_bytes=r.peak_inflight_bytes,
+            op=op,
+            options=dataclasses.asdict(options),
         )
+        if getattr(r, "trace", None) is not None:
+            out["trace"] = r.trace
+        if op == "avg":
+            out.update(
+                sum=r.sum,
+                mean=r.mean,
+                original_count=list(r.original_count),
+                original_mean=r.original_mean and list(r.original_mean),
+            )
+    elif method == "zshard_izm" and set(opts) <= {"gap_bytes"} and op == "count":
+        gap = opts.get("gap_bytes", baselines.GAP_BYTES)
+        out = sync(baselines.inner_zm(arr, side, th, CONCURRENCY, gap))
+        out["options"] = dict(gap_bytes=gap)
+    elif opts or op != "count":
+        raise ValueError("options and op apply to skipzfp, and gap_bytes to zshard_izm")
     elif method in ("zstd_zm", "zfpacc_zm"):
-        out = sync(baselines.chunk_zm(arr, th, CONCURRENCY, method[:-3]))
-    elif method == "zshard_izm":
-        out = sync(baselines.inner_zm(arr, th, CONCURRENCY))
+        out = sync(baselines.chunk_zm(arr, side, th, CONCURRENCY, method[:-3]))
     else:
         kind = method.removeprefix("fullscan_")
         out = sync(baselines.full_scan(arr, th, CONCURRENCY, kind))
-    out.update(requests=store.requests, bytes=store.bytes)
+    out.update(
+        requests=store.requests,
+        bytes=store.bytes,
+        peak_rss_kb=peak_rss_kb(),
+        **open_out,
+        **cgroup_memory(),
+    )
     print(json.dumps(out))
 
 
-def thresholds(raw, nt=None, step=64 * 16, cache=None):
+def thresholds(raw, nt=None, step=64 * 16, cache=None, selectivities=SELECTIVITIES):
     """Thresholds for each selectivity and the exact count above each.
 
     With cache, each variable is read through a memory map on disk, so it never has
@@ -96,8 +181,8 @@ def thresholds(raw, nt=None, step=64 * 16, cache=None):
     ths, truth = {}, {}
     for var in VARS:
         a = load_era5(raw, var, nt, cache=cache)
-        ths[var] = [float(x) for x in quantiles(a, [1 - s for s in SELECTIVITIES])]
-        truth[var] = [0] * len(SELECTIVITIES)
+        ths[var] = [float(x) for x in quantiles(a, [1 - s for s in selectivities])]
+        truth[var] = [0] * len(selectivities)
         for _, _, x in read_slabs(a, step):
             blk = x.astype(np.float64)
             for i, t in enumerate(ths[var]):
@@ -129,6 +214,7 @@ def jobs_for(layouts, reps):
 
 
 def run(raw, root, out_path, reps, layouts, nt=None, cache=None):
+    run_id = start_run(out_path, raw, script="exp2", reps=reps, layouts=layouts, nt=nt)
     ths, truth = thresholds(raw, nt, cache=cache)
     jobs = jobs_for(layouts, reps)
 
@@ -152,7 +238,7 @@ def run(raw, root, out_path, reps, layouts, nt=None, cache=None):
             print("failed", j, p.stderr[-2000:], flush=True)
             continue
         result = json.loads(p.stdout.strip().splitlines()[-1])
-        r = dict(j, threshold=th, truth=truth[j["var"]][idx], **result)
+        r = dict(j, threshold=th, truth=truth[j["var"]][idx], run_id=run_id, **result)
         with open(out_path, "a") as f:
             f.write(json.dumps(r) + "\n")
         if i % 25 == 0 or i == len(todo):
@@ -162,7 +248,8 @@ def run(raw, root, out_path, reps, layouts, nt=None, cache=None):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "one":
-        one(sys.argv[2], sys.argv[3], float(sys.argv[4]))
+        opts = json.loads(sys.argv[5]) if len(sys.argv) > 5 else None
+        one(sys.argv[2], sys.argv[3], float(sys.argv[4]), opts)
         sys.exit()
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["run"])

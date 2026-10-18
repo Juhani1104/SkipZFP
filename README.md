@@ -122,6 +122,29 @@ suit most queries.
    which makes a point time series one range read; `layers` stores bit-plane prefixes so
    a query can read only a lower-rate prefix.
 
+### What each result means
+
+ZFP is lossy, so every answer is about either the **decoded** values (what reading the
+array returns) or the **original** values (what was written), and is either exact or a
+guaranteed interval. The table says which, and whether it is a library call that reads
+from a store or an offline analysis in `experiments/` that needs the original data.
+
+| Result | Values | Exact or bounded | Where | Reads |
+|---|---|---|---|---|
+| `query_gt` / `query_lt` / `query_range` | decoded | exact COUNT | library | zone map + MAYBE blocks |
+| `aggregate_gt` / `_lt` / `_range` | decoded | exact COUNT, SUM, AVG | library | zone map + IN and MAYBE blocks |
+| same call, `original_*` fields | original | guaranteed COUNT, SUM, AVG intervals | library | as above |
+| COUNT interval from the zone map alone | original | guaranteed interval | offline (`exp4`) | zone map only |
+| Regional AVG / MIN / MAX bounds | original | guaranteed intervals | offline (`exp3`) | original data needed |
+| `block_error_bits=4` | both | tighter IN/OUT and intervals | library option | +0.5 byte per block |
+| `check_meta` | stored bytes | which chunks changed after `write_meta` | library | every chunk |
+
+Each original value lies within its unit's (or, with `block_error_bits=4`, its block's)
+measured error of its decoded value; every interval follows from that alone. The zone
+map describes the payload as `write_meta` saw it: rewrite a chunk and run `write_meta`
+again. A query refuses a zone map built for another codec, shape or chunk layout, and
+`check_meta` finds chunks rewritten since.
+
 ## Results
 
 From the experiments in [`experiments/`](experiments). Query times come from an
@@ -165,15 +188,18 @@ filtered aggregates and overhead give identical results on both clouds. Results 
 
 | Level | Command | Needs |
 |---|---|---|
-| Redraw figures | `python experiments/figures.py` *(with the paper)* | this repo |
+| Redraw figures and tables | `python experiments/figures.py experiments/results` and `python experiments/summarize.py experiments/results` | this repo |
 | Run the tests | `pytest` | this repo |
 | Rerun everything | `BUCKET=gs://… bash experiments/run_cloud.sh` (or `s3://…`) | a GCP or AWS VM and bucket |
 
-On a Debian or Ubuntu VM you create, `run_cloud.sh` installs the dependencies, builds
+On a Debian 12 VM you create (any Linux with Python 3.11 or newer), `run_cloud.sh`
+installs the dependencies, builds
 libzfp, downloads ERA5 from the public
 [ARCO-ERA5](https://github.com/google-research/arco-era5) store, writes every format to
 your bucket, and runs each experiment. Every step can be rerun and resumes where it
-stopped. The published results used an n2-standard-16 VM in us-central1-b.
+stopped. Next to every results file, `<file>.runs.json` records each run's code version,
+machine, package versions and data, and every row carries its `run_id`;
+`summarize.py` turns the raw results into the tables. The published results used an n2-standard-16 VM in us-central1-b.
 
 <details>
 <summary>Paper figure / table → script → result file</summary>
@@ -186,6 +212,11 @@ stopped. The published results used an n2-standard-16 VM in us-central1-b.
 | Filtered aggregates | `exp4_filtered_aggregate.py` | `results/exp4_filtered_aggregate.json` |
 | Metadata overhead | `exp5_overhead.py` | `results/exp5_overhead.json` |
 | Object-size sensitivity | `sensitivity_object_size.py` | `results/sensitivity_object_size.jsonl` |
+| Ablation, one factor at a time | `ablation.py` | `results/ablation.jsonl` |
+| Memory under a cgroup limit | `memory_limit.py` | `results/memory_limit.jsonl` |
+| Build cost of the zone map | `build_cost.py` | `results/build_cost.jsonl` |
+| All tables from the raw results | `summarize.py` | `results/summary.md` |
+| Figures from the raw results | `figures.py` | `results/figures/` |
 | README figure | `readme_figure.py` | `.github/speedup-*.svg` |
 | README diagram | `readme_diagram.py` | `.github/how-it-works-*.svg` |
 
@@ -203,8 +234,12 @@ experiments/    data download, experiments, results, cloud runner
 
 - float32, 3D arrays only; the array shape must be a whole number of chunks.
 - NaN and infinite values are rejected (ZFP cannot encode them).
-- Queries count values in a range (`query_gt`, `query_lt`, `query_range`); other
-  predicates and aggregates live in the experiments.
+- Queries count values in a range (`query_gt`, `query_lt`, `query_range`) or
+  return their COUNT, SUM and AVG (`aggregate_gt`, `aggregate_lt`,
+  `aggregate_range`), exact for the decoded values with bounds for the original
+  ones; aggregates read the blocks inside the range too.
+- `max_inflight_bytes` bounds the payload held between reading and decoding, not
+  the zone map or the planner's arrays, which grow with the array.
 
 ## Citation
 

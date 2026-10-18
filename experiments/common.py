@@ -1,5 +1,12 @@
+import ctypes
+import hashlib
+import json
 import os
+import platform
 import subprocess
+import time
+import urllib.request
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -38,9 +45,18 @@ def lossless():
 
 
 def skipzfp_codec(layout):
-    """k8: sub-chunk 64x16x32 in C order; k8t: time-fastest block order."""
-    order = (1, 2, 0) if layout.endswith("t") else (0, 1, 2)
-    return codec.SkipZFPCodec(rate=8.0, sub_chunk=SUB_CHUNK, block_order=order)
+    """k8: sub-chunk 64x16x32 in C order; k8t: time-fastest block order.
+
+    A "-b4" suffix, as in k8t-b4, also stores a 4-bit error bound per block.
+    """
+    base, _, bits = layout.partition("-b")
+    order = (1, 2, 0) if base.endswith("t") else (0, 1, 2)
+    return codec.SkipZFPCodec(
+        rate=8.0,
+        sub_chunk=SUB_CHUNK,
+        block_order=order,
+        block_error_bits=int(bits or 0),
+    )
 
 
 def format_kwargs(fmt, tol=None, chunk=SUB_CHUNK):
@@ -118,6 +134,18 @@ def load_era5(path, var, nt=None, cache=None):
     if a.shape[0] != n:
         raise ValueError(f"{out} holds {a.shape[0]} steps, not {n}; delete it")
     return a
+
+
+# The point suite's k64t layout stores 512-step objects, so every point-suite
+# store, and every threshold and check on them, uses the same whole number of
+# 512-step objects: one year's 8768 steps become 8704.
+POINT_STEP_MULTIPLE = 512
+
+
+def load_point(raw, var, cache=None):
+    """load_era5 trimmed to whole 512-step objects, the range every point store holds."""
+    a = load_era5(raw, var, cache=cache)
+    return a[: a.shape[0] // POINT_STEP_MULTIPLE * POINT_STEP_MULTIPLE]
 
 
 def write_slabs(z, a):
@@ -277,7 +305,8 @@ def open_counted(url):
     # S3 Express One Zone (directory bucket) names end in --x-s3
     opts = {"s3_express": True} if "--x-s3" in full else {}
     store = CountingStore(ObjectStore(from_url(full, **opts), read_only=True))
-    arr = zarr.open_array(store=store, path="data", mode="r")
+    # every store here is Zarr v3, so only zarr.json is requested, for every method
+    arr = zarr.open_array(store=store, path="data", mode="r", zarr_format=3)
     return arr, store
 
 
@@ -292,3 +321,188 @@ def store_url(root, var, method, size):
             f"{root}/stores_chunks/{var}/{size}/{method.removeprefix('fullscan_')}.zarr"
         )
     return f"{root}/stores_zshard/{var}/{size}.zarr"
+
+
+# What the timing fields mean, saved with every run so a reader can tell the
+# critical path from work summed over threads.
+FIELDS = {
+    "seconds": "wall time of the query, from the first metadata read to the answer",
+    "open_seconds": "wall time to open the array (zarr.json), before the query",
+    "open_requests": "requests made while opening the array",
+    "metadata_seconds": "wall time until the zone map or indexes were read",
+    "planning_seconds": "planning time; with the pipeline, summed over objects",
+    "payload_seconds": "wall time from the first payload read to the last decode",
+    "decode_seconds": "decode time summed over every read, across threads, so "
+    "it can exceed the wall time and must not be stacked with the others",
+    "requests": "requests made by the query, counted by a wrapper store",
+    "bytes": "bytes returned to the query, counted by a wrapper store",
+    "peak_rss_kb": "peak resident memory of the measuring process (VmHWM), page "
+    "cache not included",
+    "cgroup_peak_bytes": "memory.peak of the job's cgroup, page cache included",
+    "peak_inflight_bytes": "most payload bytes reserved at once, from a read's start "
+    "until its blocks are decoded: an upper bound on payload buffers, not memory "
+    "used, since reads still downloading count too; see peak_rss_kb for memory",
+}
+
+
+def source_version():
+    """The code version: git commit and uncommitted diff, or SOURCE.json if no git.
+
+    run_cloud ships code without .git, so the shipping step writes SOURCE.json
+    next to this file with the same fields.
+    """
+    here = Path(__file__).resolve().parent
+    try:
+        commit = subprocess.run(
+            ["git", "-C", str(here), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        diff = subprocess.run(
+            ["git", "-C", str(here), "diff", "HEAD"],
+            capture_output=True,
+            check=True,
+        ).stdout
+        return dict(
+            commit=commit,
+            dirty=bool(diff),
+            diff_sha256=hashlib.sha256(diff).hexdigest() if diff else None,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        f = here / "SOURCE.json"
+        return json.loads(f.read_text()) if f.exists() else dict(commit=None)
+
+
+def _gce(path):
+    """A value from the GCE metadata server, or None off Google Cloud."""
+    req = urllib.request.Request(
+        "http://metadata.google.internal/computeMetadata/v1/instance/" + path,
+        headers={"Metadata-Flavor": "Google"},
+    )
+    try:
+        return urllib.request.urlopen(req, timeout=0.5).read().decode().split("/")[-1]
+    except OSError:
+        return None
+
+
+def machine():
+    cpu = next(
+        (
+            line.split(":", 1)[1].strip()
+            for line in open("/proc/cpuinfo")
+            if line.startswith("model name")
+        ),
+        platform.processor(),
+    )
+    mem = next(
+        int(line.split()[1])
+        for line in open("/proc/meminfo")
+        if line.startswith("MemTotal")
+    )
+    return dict(
+        host=platform.node(),
+        gce_machine_type=_gce("machine-type"),
+        gce_zone=_gce("zone"),
+        cpu=cpu,
+        cpus=os.cpu_count(),
+        mem_kb=mem,
+        kernel=platform.release(),
+    )
+
+
+def calibration():
+    """Seconds for fixed work on this machine, best of three, so a run on a slower
+    host or boot shows up as such: encoding and decoding one SkipZFP chunk in
+    memory with one thread, and summing 512 MB."""
+    from zarr.storage import MemoryStore
+
+    rng = np.random.default_rng(0)
+    a = (280 + np.cumsum(rng.standard_normal((64, 128, 256)), axis=0)).astype(
+        np.float32
+    )
+    big = np.ones(2**27, np.float32)
+    enc, dec, mem = [], [], []
+    with zarr.config.set({"async.concurrency": 1, "threading.max_workers": 1}):
+        for _ in range(3):
+            z = zarr.create_array(
+                MemoryStore(),
+                shape=a.shape,
+                chunks=a.shape,
+                dtype="float32",
+                serializer=skipzfp_codec("k8t"),
+                compressors=None,
+                filters=None,
+            )
+            t = time.perf_counter()
+            z[:] = a
+            enc.append(time.perf_counter() - t)
+            t = time.perf_counter()
+            z[:]
+            dec.append(time.perf_counter() - t)
+            t = time.perf_counter()
+            big.sum()
+            mem.append(time.perf_counter() - t)
+    return dict(encode_chunk_s=min(enc), decode_chunk_s=min(dec), sum_512mb_s=min(mem))
+
+
+def packages():
+    import importlib.metadata as md
+
+    out = dict(python=platform.python_version())
+    for name in ("numpy", "zarr", "obstore", "zfpy", "numcodecs", "skipzfp"):
+        try:
+            out[name] = md.version(name)
+        except md.PackageNotFoundError:
+            out[name] = None
+    # a const char* variable in libzfp, which the C library links against
+    lib = codec.native().lib
+    out["libzfp"] = ctypes.c_char_p.in_dll(lib, "zfp_version_string").value.decode()
+    return out
+
+
+def data_version(raw):
+    """Where the raw data came from, its shape, time range and a cheap fingerprint.
+
+    The fingerprint hashes the time axis, the grid and the first and last time
+    step of every variable, so two runs on different data cannot share it.
+    """
+    if raw is None:
+        return None
+    g = zarr.open_group(str(raw), mode="r")
+    h = hashlib.sha256()
+    out = dict(path=str(raw), attrs=dict(g.attrs), arrays={})
+    for name, a in sorted(g.arrays()):
+        out["arrays"][name] = dict(shape=list(a.shape), dtype=str(a.dtype))
+        if a.ndim == 1:
+            h.update(np.asarray(a[:]).tobytes())
+        else:
+            h.update(np.asarray(a[0]).tobytes() + np.asarray(a[-1]).tobytes())
+    t = np.asarray(g["time"][[0, -1]]).astype("datetime64[h]")
+    out["time_range"] = [str(t[0]), str(t[1])]
+    out["fingerprint_sha256"] = h.hexdigest()
+    return out
+
+
+def start_run(out_path, raw=None, **extra):
+    """Record what produced the results in out_path and return this run's id.
+
+    Each run adds an entry to <out_path>.runs.json: code, machine, packages,
+    data and any extra settings. Every result row should carry the returned
+    run_id, since one results file can gather rows from several runs.
+    """
+    run_id = time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
+    side = Path(str(out_path) + ".runs.json")
+    runs = json.loads(side.read_text()) if side.exists() else {}
+    runs[run_id] = dict(
+        started=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        source=source_version(),
+        machine=machine(),
+        calibration=calibration(),
+        packages=packages(),
+        data=data_version(raw),
+        fields=FIELDS,
+        **extra,
+    )
+    side.write_text(json.dumps(runs, indent=1))
+    return run_id

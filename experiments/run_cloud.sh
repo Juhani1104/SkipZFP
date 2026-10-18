@@ -4,9 +4,16 @@
 #   BUCKET=gs://your-bucket/skipzfp bash experiments/run_cloud.sh [step ...]
 #   BUCKET=s3://your-bucket/skipzfp bash experiments/run_cloud.sh [step ...]
 #
-# Steps run in order: setup fetch prepare exp1 exp2 sensitivity local.
-# Pass step names to run only some of them. Every step can be rerun; downloads and
-# measurements resume where they stopped. The VM's service account (GCP) or instance
+# Steps run in order: setup fetch prepare prepare_bits exp1 exp2 ablation memory build
+# sensitivity local summary. Pass step names to run only some of them. Every step can
+# be rerun; downloads and measurements resume where they stopped. EXP2_REPS (default
+# 30), ABL_REPS (20), TAIL_REPS (30), MEM_REPS (3) and BUILD_REPS (2) set the
+# repetitions, and LIMITS
+# (1G,2G,4G,none) the memory limits. NT, if set, cuts the ten-year data to its first
+# NT steps, for a quick trial run on a small store (BUCKET may then be a local folder).
+# Needs Python 3.11 or newer (Debian 12 has it).
+# Every results file gets a <file>.runs.json with the code version, machine,
+# packages and data of each run; run from a git checkout, or ship SOURCE.json. The VM's service account (GCP) or instance
 # role (AWS) needs read/write access to BUCKET, and the VM should be in the same region
 # as the bucket. On AWS, set AWS_REGION to the bucket's region (default us-east-1).
 set -euo pipefail
@@ -18,8 +25,10 @@ EXP="$REPO/experiments"
 DATA="${DATA:-$HOME/skipzfp_data}"
 OUT="${OUT:-$EXP/results_rerun}"
 PY="$REPO/.venv/bin/python"
+TEN="$DATA/era5_2000_2009.zarr"
 STEPS=("$@")
-[ ${#STEPS[@]} -eq 0 ] && STEPS=(setup fetch prepare exp1 exp2 sensitivity local)
+[ ${#STEPS[@]} -eq 0 ] && STEPS=(setup fetch prepare prepare_bits exp1 exp2 ablation
+    memory build sensitivity local summary)
 mkdir -p "$DATA" "$OUT"
 
 step_setup() {
@@ -49,7 +58,13 @@ step_prepare() {
     cd "$EXP"
     "$PY" prepare_stores.py "$DATA/era5_2000.zarr" "$BUCKET" --suite point --tmp "$DATA/tmp"
     "$PY" prepare_stores.py "$DATA/era5_2000_2009.zarr" "$BUCKET/era10y" \
-        --suite threshold --tmp "$DATA/tmp"
+        --suite threshold --tmp "$DATA/tmp" ${NT:+--nt "$NT"}
+}
+
+step_prepare_bits() {
+    cd "$EXP"
+    "$PY" prepare_stores.py "$TEN" "$BUCKET/era10y" --suite bits --tmp "$DATA/tmp" \
+        ${NT:+--nt "$NT"}
 }
 
 step_exp1() {
@@ -60,8 +75,35 @@ step_exp1() {
 
 step_exp2() {
     cd "$EXP"
-    "$PY" exp2_threshold_query.py run "$DATA/era5_2000_2009.zarr" "$BUCKET/era10y" \
-        "$OUT/exp2_threshold_query.jsonl"
+    "$PY" exp2_threshold_query.py run "$TEN" "$BUCKET/era10y" \
+        "$OUT/exp2_threshold_query.jsonl" --reps "${EXP2_REPS:-30}" --cache "$DATA/tmp" \
+        ${NT:+--nt "$NT"}
+}
+
+step_ablation() {
+    cd "$EXP"
+    "$PY" ablation.py run "$TEN" "$BUCKET/era10y" "$OUT/ablation.jsonl" \
+        --reps "${ABL_REPS:-20}" --tail-reps "${TAIL_REPS:-30}" --cache "$DATA/tmp" \
+        ${NT:+--nt "$NT"}
+}
+
+step_memory() {
+    cd "$EXP"
+    "$PY" memory_limit.py run "$TEN" "$BUCKET/era10y" "$OUT/memory_limit.jsonl" \
+        --limits "${LIMITS:-1G,2G,4G,none}" --reps "${MEM_REPS:-3}" --cache "$DATA/tmp" \
+        ${NT:+--nt "$NT"}
+}
+
+step_build() {
+    cd "$EXP"
+    "$PY" build_cost.py run "$TEN" "$OUT/build_cost.jsonl" --tmp "$DATA/build_tmp" \
+        --reps "${BUILD_REPS:-2}" ${NT:+--nt "$NT"}
+}
+
+step_summary() {
+    cd "$EXP"
+    "$PY" summarize.py "$OUT" --out "$OUT/summary.md"
+    "$PY" figures.py "$OUT" --out "$OUT/figures"
 }
 
 step_sensitivity() {
@@ -73,7 +115,10 @@ step_sensitivity() {
 step_local() {
     cd "$EXP"
     "$PY" exp3_aggregate.py "$DATA/era5_2000.zarr" "$OUT/exp3_aggregate.json"
-    "$PY" exp4_filtered_aggregate.py "$DATA/era5_2000.zarr" "$OUT/exp4_filtered_aggregate.json"
+    # exp4 builds its own stores to read from; keep them, and the blocks each query
+    # read, with the data rather than among the results
+    "$PY" exp4_filtered_aggregate.py "$DATA/era5_2000.zarr" "$OUT/exp4_filtered_aggregate.json" \
+        --stores "$DATA/exp4_stores"
     "$PY" exp5_overhead.py "$OUT/exp5_overhead.json"
 }
 

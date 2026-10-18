@@ -22,8 +22,33 @@ from zarr.core.buffer import default_buffer_prototype
 from zarr.core.sync import sync
 
 from ._native import check, load_library
-from .codec import META_ATTR, META_T_CHUNK_ATTR, find_codec, meta_size
+from .codec import (
+    META_ATTR,
+    META_SOURCE_ATTR,
+    META_T_CHUNK_ATTR,
+    check_source,
+    find_codec,
+    meta_size,
+)
 from .codec import native as codec_native
+
+
+class _Aggregate(ctypes.Structure):
+    """SzAggregate in csrc/query.h: running totals of a filtered aggregate."""
+
+    _fields_ = [
+        ("rec_count", ctypes.c_uint64),
+        ("rec_sum", ctypes.c_double),
+        ("sure_count", ctypes.c_uint64),
+        ("sure_sum_lo", ctypes.c_double),
+        ("sure_sum_hi", ctypes.c_double),
+        ("maybe_count", ctypes.c_uint64),
+        ("maybe_sum_neg", ctypes.c_double),
+        ("maybe_sum_pos", ctypes.c_double),
+        ("maybe_min", ctypes.c_double),
+        ("maybe_max", ctypes.c_double),
+        ("abs_total", ctypes.c_double),
+    ]
 
 
 class _Native:
@@ -86,6 +111,39 @@ class _Native:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         self.lib.szfp_count_offsets_range.restype = ctypes.c_int
+
+        self.lib.szfp_plan_read_chunks.argtypes = [
+            ctypes.POINTER(ctypes.c_ubyte),
+            *[ctypes.c_size_t] * 8,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.lib.szfp_plan_read_chunks.restype = ctypes.c_int
+
+        self.lib.szfp_aggregate_offsets_range.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_double,
+            ctypes.c_int,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.POINTER(_Aggregate),
+        ]
+        self.lib.szfp_aggregate_offsets_range.restype = ctypes.c_int
 
     def plan_chunks(
         self,
@@ -234,6 +292,106 @@ class _Native:
         check(code, "szfp_count_offsets_range")
         return int(out.value)
 
+    def plan_read(
+        self,
+        meta: np.ndarray,
+        meta_size: int,
+        unit_grid: tuple[int, int, int],
+        subs: tuple[int, int, int],
+        blocks_per_unit: int,
+        lo: float,
+        hi: float,
+        threads: int,
+        eps: bool = False,
+    ) -> tuple[Any, ...]:
+        """Classify blocks for lo < x <= hi and return the IN and MAYBE blocks.
+
+        It returns the (chunk, block) ids of the listed blocks in chunk order,
+        the state of each (1 = IN, 2 = MAYBE), and the IN and OUT counts. With
+        eps=True it also returns each listed block's error bound as float32,
+        rounded up, last.
+        """
+        src = np.ascontiguousarray(meta, dtype=np.uint8)
+        cap = int(np.prod(unit_grid)) * blocks_per_unit
+        chunk_ids = np.empty(cap, dtype=np.uint32)
+        block_ids = np.empty(cap, dtype=np.uint32)
+        states = np.empty(cap, dtype=np.uint8)
+        bounds = np.empty(cap if eps else 0, dtype=np.float32)
+
+        n_read = ctypes.c_size_t()
+        n_in = ctypes.c_size_t()
+        n_out = ctypes.c_size_t()
+
+        code = self.lib.szfp_plan_read_chunks(
+            src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
+            meta_size,
+            *unit_grid,
+            *subs,
+            blocks_per_unit,
+            lo,
+            hi,
+            threads,
+            chunk_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
+            block_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
+            states.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
+            bounds.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if eps else None,
+            cap,
+            ctypes.byref(n_read),
+            ctypes.byref(n_in),
+            ctypes.byref(n_out),
+        )
+        check(code, "szfp_plan_read_chunks")
+
+        n = int(n_read.value)
+        out = (
+            chunk_ids[:n],
+            block_ids[:n],
+            states[:n],
+            int(n_in.value),
+            int(n_out.value),
+        )
+        return (*out, bounds[:n]) if eps else out
+
+    def aggregate_offsets(
+        self,
+        data: Any,
+        offsets: np.ndarray,
+        eps: np.ndarray,
+        in_block: np.ndarray,
+        block_size: int,
+        rate: float,
+        block_dim: int,
+        lo: float,
+        hi: float,
+    ) -> _Aggregate:
+        """Decode the blocks at the given byte offsets and aggregate lo < x <= hi.
+
+        eps is each block's error bound and in_block marks the IN blocks. data
+        is any contiguous bytes-like object, read in place without a copy.
+        """
+        src = np.frombuffer(data, dtype=np.uint8)
+        offs = np.ascontiguousarray(offsets, dtype=np.uint64)
+        e = np.ascontiguousarray(eps, dtype=np.float32)
+        flag = np.ascontiguousarray(in_block, dtype=np.uint8)
+        out = _Aggregate()
+
+        code = self.lib.szfp_aggregate_offsets_range(
+            src.ctypes.data,
+            src.size,
+            offs.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
+            e.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            flag.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
+            len(offs),
+            block_size,
+            rate,
+            block_dim,
+            lo,
+            hi,
+            ctypes.byref(out),
+        )
+        check(code, "szfp_aggregate_offsets_range")
+        return out
+
 
 _NATIVE: _Native | None = None
 _POOLS: dict[int, ThreadPoolExecutor] = {}
@@ -280,6 +438,24 @@ class QueryOptions:
             is the lowest rate and None reads the full rate.
         max_chunk_requests: When layer > 0, a chunk that would need more than
             this many reads is fetched in a single read instead.
+        pipeline: Plan and read each zone map object as soon as it arrives,
+            when the layout allows it. False runs the steps in turn, to
+            measure what the overlap is worth.
+        zero_copy: Decode each read in place. False copies it to bytes first,
+            on the event loop, as earlier versions did, to measure the copy.
+        max_inflight_bytes: Most payload bytes held at once, counted from
+            when a read starts until its blocks are decoded, or None for no
+            limit. A read larger than the limit still runs, alone. It bounds
+            the payload buffers only, not the zone map or the planner's
+            arrays.
+        meta_by_key: Read the zone map objects directly by key. False opens
+            the zone map as a Zarr array first, reading its zarr.json, as for
+            arrays written before t_chunk was recorded, to measure what the
+            direct read is worth. The pipeline needs the direct read, so False
+            also runs the steps in turn.
+        trace: Record when each zone map object arrived and when each payload
+            read started, arrived and was decoded, in QueryResult.trace, to
+            see where the time of a query goes.
 
     Raises:
         ValueError: If a value is out of range.
@@ -295,6 +471,11 @@ class QueryOptions:
     merge_gap_blocks: int = 0
     layer: int | None = None
     max_chunk_requests: int = 1
+    pipeline: bool = True
+    zero_copy: bool = True
+    max_inflight_bytes: int | None = None
+    meta_by_key: bool = True
+    trace: bool = False
 
     def __post_init__(self) -> None:
         if self.threads < 0:
@@ -307,6 +488,8 @@ class QueryOptions:
             raise ValueError("merge_gap_blocks must be non-negative")
         if self.max_chunk_requests <= 0:
             raise ValueError("max_chunk_requests must be greater than 0")
+        if self.max_inflight_bytes is not None and self.max_inflight_bytes <= 0:
+            raise ValueError("max_inflight_bytes must be greater than 0")
 
 
 @dataclass(frozen=True)
@@ -338,6 +521,18 @@ class QueryResult:
         decode_seconds: Time spent decoding, which with layer 0 is summed
             over reads running in parallel and can exceed the wall time.
         total_seconds: Wall time of the whole query.
+        peak_inflight_bytes: Most payload bytes reserved at once, see
+            QueryOptions.max_inflight_bytes. A read reserves its size when it
+            starts, before its bytes arrive, and frees it once its blocks are
+            decoded, so this bounds the payload buffers from above; with no
+            limit, reads still downloading count too, so it can be far above
+            the memory actually used. With layer > 0 every read is held until
+            all have arrived, so it equals payload_bytes_read.
+        trace: With QueryOptions.trace and layer 0, seconds since the query
+            started: "meta" holds when each zone map object arrived (one
+            time for the whole zone map unless pipelined) and "reads" holds
+            (issued, arrived, decoded) for each payload read, where a read
+            issued may still wait for a free request slot. None otherwise.
     """
 
     count: int
@@ -356,6 +551,8 @@ class QueryResult:
     payload_read_seconds: float
     decode_seconds: float
     total_seconds: float
+    peak_inflight_bytes: int = 0
+    trace: dict[str, list[Any]] | None = None
 
     @property
     def bytes_read(self) -> int:
@@ -583,6 +780,7 @@ async def read_one(
     store: Any,
     req: _Range,
     sem: asyncio.Semaphore,
+    copy: bool = False,
 ) -> np.ndarray:
     """Read one byte range, as a uint8 view of the returned buffer.
 
@@ -600,7 +798,8 @@ async def read_one(
     if buf is None:
         raise FileNotFoundError(req.key)
 
-    data = buf.as_numpy_array()
+    # copy=True is the older behaviour, kept so its cost can be measured
+    data = np.frombuffer(buf.to_bytes(), np.uint8) if copy else buf.as_numpy_array()
     want = req.end - req.start
 
     if len(data) != want:
@@ -615,6 +814,7 @@ async def read_ranges(
     *,
     concurrency: int,
     batch_size: int,
+    copy: bool = False,
 ) -> list[np.ndarray]:
     """Read byte ranges in batches.
 
@@ -630,7 +830,9 @@ async def read_ranges(
     out: list[np.ndarray] = []
 
     for batch in batched(reqs, batch_size):
-        parts = await asyncio.gather(*(read_one(store, req, sem) for req in batch))
+        parts = await asyncio.gather(
+            *(read_one(store, req, sem, copy) for req in batch)
+        )
         out.extend(parts)
 
     return out
@@ -655,6 +857,9 @@ def meta_objects(arr: zarr.Array, lt: _Layout) -> _MetaObjects | None:
     path = arr.attrs.get(META_ATTR)
     if not path:
         raise ValueError("array has no metadata; run codec.write_meta first")
+    source = arr.attrs.get(META_SOURCE_ATTR)
+    if source:  # zone maps written before the source was recorded are trusted
+        check_source(arr, source)
 
     t_chunk = arr.attrs.get(META_T_CHUNK_ATTR)
     if t_chunk is None:
@@ -688,17 +893,18 @@ async def read_meta_object(
 
 
 async def read_meta(
-    arr: zarr.Array, lt: _Layout, concurrency: int = 32
+    arr: zarr.Array, lt: _Layout, concurrency: int = 32, by_key: bool = True
 ) -> tuple[np.ndarray, int, int]:
     """Read the whole zone map, with its size in bytes and number of objects.
 
     The zone map's shape follows from the layout, so when arr records its
     t_chunk the objects are fetched directly by key, skipping the round trip
     to open the zone map's zarr.json. Arrays written before t_chunk was
-    recorded fall back to opening it as a Zarr array.
+    recorded fall back to opening it as a Zarr array, and so does
+    by_key=False.
     """
     mo = meta_objects(arr, lt)
-    if mo is None:
+    if mo is None or not by_key:
         return await read_meta_zarr(arr, lt, arr.attrs[META_ATTR])
 
     store = arr.store_path.store
@@ -750,6 +956,36 @@ def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
     )
 
 
+class ByteBudget:
+    """Limit the payload bytes held at once, and record the most ever held.
+
+    A read reserves its size before it starts and gives it back once its
+    blocks are decoded, so the bytes waiting for a decoder count too, not just
+    the downloads in flight. With limit None it only records the peak.
+    """
+
+    def __init__(self, limit: int | None = None) -> None:
+        self.limit = limit
+        self.used = 0
+        self.peak = 0
+        self._cond = asyncio.Condition()
+
+    async def acquire(self, n: int) -> None:
+        async with self._cond:
+            if self.limit is not None:
+                # a read larger than the limit runs once nothing else is held
+                await self._cond.wait_for(
+                    lambda: self.used == 0 or self.used + n <= self.limit
+                )
+            self.used += n
+            self.peak = max(self.peak, self.used)
+
+    async def release(self, n: int) -> None:
+        async with self._cond:
+            self.used -= n
+            self._cond.notify_all()
+
+
 async def stream_count(
     store: Any,
     merged: Sequence[_MergedRange],
@@ -762,14 +998,23 @@ async def stream_count(
     concurrency: int,
     threads: int,
     sem: asyncio.Semaphore | None = None,
+    budget: ByteBudget | None = None,
+    copy: bool = False,
+    trace: list[tuple[float, float, float]] | None = None,
+    t0: float = 0.0,
 ) -> tuple[int, int, float]:
     """Read each merged range and count lo < x <= hi as soon as it arrives.
 
     It returns the count, the bytes read and the decode seconds summed over
-    all reads. Pass sem to share the concurrency limit with other reads.
+    all reads. Pass sem to share the concurrency limit with other reads, and
+    budget to share a limit on the bytes held between reading and decoding.
+    copy=True copies each read before decoding, as earlier versions did. With
+    trace, each read appends when it started, arrived and was decoded, in
+    seconds since t0.
     """
     loop = asyncio.get_running_loop()
     sem = sem or asyncio.Semaphore(concurrency)
+    budget = budget or ByteBudget()
 
     def count(data: np.ndarray, offs: np.ndarray) -> tuple[int, float]:
         t0 = time.perf_counter()
@@ -777,14 +1022,26 @@ async def stream_count(
         return n, time.perf_counter() - t0
 
     async def one(req: _MergedRange) -> tuple[int, int, float]:
-        data = await read_one(
-            store, _Range(key=req.key, start=req.start, end=req.end), sem
-        )
-        rows = blocks[req.item_start : req.item_end].astype(np.int64) - req.first_block
-        n, sec = await loop.run_in_executor(
-            pool(threads), count, data, (rows * block_size).astype(np.uint64)
-        )
-        return n, len(data), sec
+        size = req.end - req.start
+        await budget.acquire(size)
+        try:
+            start = time.perf_counter()
+            data = await read_one(
+                store, _Range(key=req.key, start=req.start, end=req.end), sem, copy
+            )
+            arrived = time.perf_counter()
+            rows = (
+                blocks[req.item_start : req.item_end].astype(np.int64) - req.first_block
+            )
+            n, sec = await loop.run_in_executor(
+                pool(threads), count, data, (rows * block_size).astype(np.uint64)
+            )
+            del data  # drop the buffer before giving its bytes back
+        finally:
+            await budget.release(size)
+        if trace is not None:
+            trace.append((start - t0, arrived - t0, time.perf_counter() - t0))
+        return n, size, sec
 
     parts = await asyncio.gather(*(one(r) for r in merged))
     return sum(p[0] for p in parts), sum(p[1] for p in parts), sum(p[2] for p in parts)
@@ -869,15 +1126,31 @@ async def _query_async(
     # With layer 0 and zone map objects that cover whole chunks along the
     # first axis, each object is planned and its blocks read as soon as it
     # arrives, overlapping the three steps below instead of running them in turn.
+    if layer > 0 and opts.max_inflight_bytes is not None:
+        raise ValueError(
+            "max_inflight_bytes needs layer 0: other layers hold every read "
+            "until all have arrived"
+        )
     mo = meta_objects(arr, lt)
-    if layer == 0 and mo is not None and mo.t_chunk % lt.unit_grid_per_chunk[0] == 0:
+    if (
+        opts.pipeline
+        and opts.meta_by_key
+        and layer == 0
+        and mo is not None
+        and mo.t_chunk % lt.unit_grid_per_chunk[0] == 0
+    ):
         return await _query_pipelined(arr, lt, mo, lo, hi, opts, keys, t0)
+    budget = ByteBudget(opts.max_inflight_bytes)
+    trace: dict[str, list[Any]] | None = None
 
     # 1. read the zone map: per-unit value range and error bounds, plus
     # per-block offsets
     t1 = time.perf_counter()
-    meta, meta_bytes, meta_requests = await read_meta(arr, lt, opts.request_concurrency)
+    meta, meta_bytes, meta_requests = await read_meta(
+        arr, lt, opts.request_concurrency, opts.meta_by_key
+    )
     meta_read_sec = time.perf_counter() - t1
+    meta_done = time.perf_counter() - t0
 
     # 2. plan: classify every block as IN, OUT or MAYBE. plan_meta keeps only
     # the chosen layer's error bound, so the C planner sees a single-layer
@@ -932,6 +1205,8 @@ async def _query_async(
         # payload_read_sec includes decoding, and decode_sec sums the decode
         # time of every read.
         merged0, sorted0 = per_layer[0]
+        if opts.trace:
+            trace = {"meta": [meta_done], "reads": []}
         t1 = time.perf_counter()
         n_maybe_val, payload_bytes, decode_sec = await stream_count(
             store,
@@ -944,9 +1219,14 @@ async def _query_async(
             hi,
             opts.request_concurrency,
             opts.threads,
+            budget=budget,
+            copy=not opts.zero_copy,
+            trace=trace["reads"] if trace else None,
+            t0=t0,
         )
         payload_read_sec = time.perf_counter() - t1
         n_payload_reqs = len(merged0)
+        peak = budget.peak
     else:
         # A block's bits are split across layers, so all reads must finish
         # before any block can be decoded. Read everything, assemble one row
@@ -971,6 +1251,7 @@ async def _query_async(
             payload_reqs,
             concurrency=opts.request_concurrency,
             batch_size=batch_size,
+            copy=not opts.zero_copy,
         )
         payload_read_sec = time.perf_counter() - t1
 
@@ -1015,6 +1296,7 @@ async def _query_async(
         decode_sec = time.perf_counter() - t1
         payload_bytes = sum(len(x) for x in payload_parts)
         n_payload_reqs = len(payload_reqs)
+        peak = payload_bytes
 
     total_blocks = len(keys) * lt.blocks_per_chunk
     # every value of an IN block matches, so IN blocks are counted unread
@@ -1038,6 +1320,8 @@ async def _query_async(
         payload_read_seconds=payload_read_sec,
         decode_seconds=decode_sec,
         total_seconds=time.perf_counter() - t0,
+        peak_inflight_bytes=peak,
+        trace=trace,
     )
 
 
@@ -1062,11 +1346,15 @@ async def _query_pipelined(
     """
     store = arr.store_path.store
     sem = asyncio.Semaphore(opts.request_concurrency)
+    budget = ByteBudget(opts.max_inflight_bytes)
     subs = lt.unit_grid_per_chunk
     chunks_per_step = lt.grid_shape[1] * lt.grid_shape[2]
     meta_size = lt.meta_size - 4 * (len(lt.layers) - 1)
     last_meta = t0
     first_read = math.inf
+    trace: dict[str, list[Any]] | None = (
+        {"meta": [], "reads": []} if opts.trace else None
+    )
 
     def plan(slab: np.ndarray, n_units: int) -> tuple[Any, ...]:
         t1 = time.perf_counter()
@@ -1085,7 +1373,10 @@ async def _query_pipelined(
     async def one(i: int) -> tuple[int, ...]:
         nonlocal last_meta, first_read
         data = await read_meta_object(store, mo, i, sem)
-        last_meta = max(last_meta, time.perf_counter())
+        arrived = time.perf_counter()
+        last_meta = max(last_meta, arrived)
+        if trace is not None:
+            trace["meta"].append(arrived - t0)
         u0 = i * mo.t_chunk
         n_units = min(mo.t_chunk, lt.unit_grid[0] - u0)
         chunk_ids, block_ids, n_in, n_out, sec = await asyncio.to_thread(
@@ -1109,6 +1400,10 @@ async def _query_pipelined(
             opts.request_concurrency,
             opts.threads,
             sem,
+            budget,
+            not opts.zero_copy,
+            trace["reads"] if trace is not None else None,
+            t0,
         )
         return n_in, n_out, len(blocks), n, nbytes, len(merged), sec, dec
 
@@ -1139,6 +1434,8 @@ async def _query_pipelined(
         payload_read_seconds=end - first_read if n_reqs else 0.0,
         decode_seconds=decode_sec,
         total_seconds=end - t0,
+        peak_inflight_bytes=budget.peak,
+        trace=trace,
     )
 
 

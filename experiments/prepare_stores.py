@@ -1,11 +1,14 @@
 """Build the stores the experiments read and copy them to a bucket or local root.
 
-usage: python prepare_stores.py <raw.zarr> <dest> --suite threshold|point [--tmp DIR]
+usage: python prepare_stores.py <raw.zarr> <dest> --suite threshold|bits|point
+                                [--tmp DIR]
                                 [--nt N] [--vars t2m,ws]
 
 threshold  exp2 (ten years): SkipZFP k8, k8t; zstd and ZFP fixed-accuracy with chunk
            zone maps at 64x64x128 and 64x128x256; Zarr sharding with inner chunks
            64x16x32 and 16x16x16.
+bits       the ablation: SkipZFP k8t-b4, which is k8t with a 4-bit error bound
+           per block; build it next to the threshold suite.
 point      exp1 and the sensitivity study (one year): SkipZFP k8, k8t, k64t; zstd and
            ZFP fixed-accuracy at 64x16x32; Zarr sharding with inner chunks 16x4x4,
            16x16x16 and 64x16x32.
@@ -23,6 +26,7 @@ import numpy as np
 import zarr
 
 from common import (
+    POINT_STEP_MULTIPLE,
     SHARD,
     VARS,
     chunk_stats,
@@ -30,6 +34,7 @@ from common import (
     format_kwargs,
     inner_stats,
     load_era5,
+    load_point,
     lossless,
     put,
     shape_of,
@@ -45,13 +50,15 @@ SUITES = {
         chunks=["64x64x128", "64x128x256"],
         inners=["64x16x32", "16x16x16"],
     ),
+    # the ablation's 4-bit store, the same layout as exp2's k8t plus per-block bounds
+    "bits": dict(skipzfp=["k8t-b4"], chunks=[], inners=[]),
     "point": dict(
         skipzfp=["k8", "k8t", "k64t"],
         chunks=["64x16x32"],
         inners=["16x4x4", "16x16x16", "64x16x32"],
     ),
 }
-K64T_STEPS = 512
+K64T_STEPS = POINT_STEP_MULTIPLE
 
 
 def new_group(path):
@@ -133,14 +140,26 @@ def prepare(raw, dest, suite, tmp, nt=None, variables=VARS):
     tmp.mkdir(parents=True, exist_ok=True)
     tols = {}
 
+    stores = {}  # every store's shape, chunks and codecs, uploaded at the end
+
     def done(path, sub):
+        z = zarr.open_array(str(path), path="data", mode="r", zarr_format=3)
+        stores[f"{sub}/{path.name}"] = dict(
+            shape=list(z.shape),
+            chunks=list(z.chunks),
+            shards=list(z.shards) if z.shards else None,
+            codecs=[c.to_dict() for c in z.metadata.codecs],
+        )
         upload(path, f"{dest}/{sub}")
         shutil.rmtree(path)
         print(sub, path.name, "done", flush=True)
 
     for var in variables:
         # a memory map on disk, so a variable never has to fit in memory
-        a = load_era5(raw, var, nt, cache=tmp)
+        if suite == "point":  # every point store holds the same 512-step range
+            a = load_point(raw, var, cache=tmp)
+        else:
+            a = load_era5(raw, var, nt, cache=tmp)
         print(var, a.shape, flush=True)
         for layout in spec["skipzfp"]:
             path = tmp / f"{layout}.zarr"
@@ -162,6 +181,8 @@ def prepare(raw, dest, suite, tmp, nt=None, variables=VARS):
         Path(tmp, f"{var}.npy").unlink()
     Path(tmp, f"tolerances_{suite}.json").write_text(json.dumps(tols))
     upload(Path(tmp, f"tolerances_{suite}.json"), dest)
+    Path(tmp, f"stores_{suite}.json").write_text(json.dumps(stores, indent=1))
+    upload(Path(tmp, f"stores_{suite}.json"), dest)
     print("all stores ready", tols, flush=True)
 
 

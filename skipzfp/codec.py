@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import itertools
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, ClassVar, Self
@@ -222,6 +224,11 @@ class SkipZFPCodec(ArrayBytesCodec):
             keep the whole chunk as one unit. Each unit is encoded on its
             own with its own entry in the zone map, which keeps chunks large
             (fewer objects) while the zone map stays fine-grained.
+        block_error_bits: 0 to keep one error bound per unit, or 4 to also
+            store a 4-bit error bound per block in the zone map, which costs
+            half a byte per block but lets queries classify each block with
+            its own error instead of the largest one in its unit. Only
+            single-layer arrays support 4.
 
     Example:
         >>> group = zarr.open_group("demo.zarr", mode="w")
@@ -242,6 +249,7 @@ class SkipZFPCodec(ArrayBytesCodec):
     layers: tuple[float, ...] = ()
     block_order: tuple[int, ...] = (0, 1, 2)
     sub_chunk: tuple[int, ...] = ()
+    block_error_bits: int = 0
 
     def __post_init__(self) -> None:
         if self.rate <= 0:
@@ -267,6 +275,13 @@ class SkipZFPCodec(ArrayBytesCodec):
         ):
             raise ValueError("sub_chunk must be three positive multiples of block_dim")
         object.__setattr__(self, "sub_chunk", sub_chunk)
+
+        bits = int(self.block_error_bits)
+        if bits not in (0, 4):
+            raise ValueError("block_error_bits must be 0 or 4")
+        if bits and len(layers) > 1:
+            raise ValueError("block_error_bits needs a single layer")
+        object.__setattr__(self, "block_error_bits", bits)
 
     def unit(self, shape: tuple[int, ...]) -> tuple[int, ...]:
         """Return the shape of one unit in a chunk of the given shape."""
@@ -305,6 +320,7 @@ class SkipZFPCodec(ArrayBytesCodec):
             layers=tuple(cfg.get("layers") or ()),
             block_order=tuple(cfg.get("block_order") or (0, 1, 2)),
             sub_chunk=tuple(cfg.get("sub_chunk") or ()),
+            block_error_bits=int(cfg.get("block_error_bits", 0)),
         )
 
     def to_dict(self) -> dict[str, JSON]:
@@ -316,6 +332,8 @@ class SkipZFPCodec(ArrayBytesCodec):
                 "layers": list(self.layers),
                 "block_order": list(self.block_order),
                 "sub_chunk": list(self.sub_chunk),
+                # written only when used, so existing arrays keep their metadata
+                **({"block_error_bits": 4} if self.block_error_bits else {}),
             },
         }
 
@@ -490,12 +508,58 @@ def meta_size(codec: SkipZFPCodec, chunk: tuple[int, ...]) -> int:
 
     A record holds the unit's min and max as two float32, one float32 error
     bound per layer, and each block's quantized min and max as two uint8.
+    With block_error_bits = 4 it ends with a 4-bit error code per block, two
+    blocks per byte.
     """
     n = int(np.prod([s // codec.block_dim for s in chunk]))
-    return 8 + 4 * len(codec.layers) + 2 * n
+    codes = (n + 1) // 2 if codec.block_error_bits else 0
+    return 8 + 4 * len(codec.layers) + 2 * n + codes
+
+
+def block_error_codes(
+    data: np.ndarray, rec: np.ndarray, eps: float, block_dim: int = 4
+) -> np.ndarray:
+    """Return the 4-bit error code of each block of a unit, in C order.
+
+    Code q bounds the block's largest error |data - rec| by eps * q / 15. It is
+    rounded up, and then checked with the very expression the query planner
+    uses, so the bound never falls short of the error.
+    """
+    b = tuple(s // block_dim for s in data.shape)
+    err = np.abs(data.astype(np.float64) - rec.astype(np.float64))
+    err = err.reshape(b[0], block_dim, b[1], block_dim, b[2], block_dim)
+    err = err.max(axis=(1, 3, 5)).reshape(-1)
+    e = float(np.float32(eps))
+    if e == 0.0:
+        if err.any():
+            raise ValueError("a block has an error but the unit's bound is 0")
+        return np.zeros(err.size, np.uint8)
+    q = np.minimum(np.ceil(15.0 * err / e), 15.0)
+    short = e * q / 15.0 < err  # same order of operations as the C planner
+    q[short] += 1
+    if (q > 15).any() or (e * q / 15.0 < err).any():
+        raise ValueError("the unit's error bound does not cover a block")
+    return q.astype(np.uint8)
+
+
+def pack_codes(q: np.ndarray) -> np.ndarray:
+    """Pack 4-bit codes two per byte, the first one in the low nibble."""
+    if q.size % 2:
+        q = np.append(q, np.uint8(0))
+    return (q[0::2] | (q[1::2] << 4)).astype(np.uint8)
+
+
+def unpack_codes(packed: np.ndarray, n: int) -> np.ndarray:
+    """Undo pack_codes, returning n codes."""
+    p = np.asarray(packed, np.uint8)
+    return np.stack([p & 15, p >> 4], axis=-1).reshape(*p.shape[:-1], -1)[..., :n]
 
 
 META_ATTR = "skipzfp_meta"
+# what the zone map was built from: the codec, the shape and chunks, and the CRC32
+# of every stored chunk object, so a query can refuse a zone map built for another
+# layout and check_meta can find chunks rewritten after write_meta
+META_SOURCE_ATTR = "skipzfp_meta_source"
 # units along the first axis in each zone map object, so a query can compute the
 # object keys and sizes without opening the zone map's zarr.json
 META_T_CHUNK_ATTR = "skipzfp_meta_t_chunk"
@@ -532,7 +596,11 @@ def write_meta(
 
     The zone map is saved as a uint8 array next to arr, replacing any
     existing one at the same path, and arr's attributes record its path and
-    t_chunk so a query can read it without opening it as an array.
+    t_chunk so a query can read it without opening it as an array. They also
+    record what it was built from: the codec, shape and chunks, which every
+    query checks, and the CRC32 of every chunk object, which check_meta uses
+    to find chunks written afterwards. The zone map holds only for the payload
+    as written now: after writing any chunk again, run write_meta again.
 
     Args:
         arr: An array written with SkipZFPCodec, inside a group.
@@ -584,22 +652,111 @@ def write_meta(
     )
 
     # One record per unit: min and max, each layer's error bound, then the
-    # per-block offsets in storage order. Min, max and offsets depend only on
-    # the data, so taking them from the last layer's result is enough.
+    # per-block offsets in storage order, then with block_error_bits the
+    # per-block error codes in the same order. Min, max and offsets depend
+    # only on the data, so taking them from the last layer's result is enough.
     def one(idx: tuple[int, ...]) -> np.ndarray:
         sl = tuple(slice(i * u, (i + 1) * u) for i, u in zip(idx, unit))
-        per = [native().meta(data[sl], r, codec.block_dim) for r in codec.layers]
+        x = np.ascontiguousarray(data[sl], dtype=np.float32)
+        per = [native().meta(x, r, codec.block_dim) for r in codec.layers]
         offs = per[-1][12:].reshape(-1, 2)
         ranked = np.empty_like(offs)
         ranked[rank] = offs
-        return np.concatenate(
-            [per[-1][:8], *(m[8:12] for m in per), ranked.reshape(-1)]
-        )
+        parts = [per[-1][:8], *(m[8:12] for m in per), ranked.reshape(-1)]
+        if codec.block_error_bits:
+            rec = native().decode(
+                native().encode(x, codec.rate, codec.block_dim),
+                unit,
+                codec.rate,
+                codec.block_dim,
+            )
+            eps = float(np.frombuffer(per[-1][8:12].tobytes(), np.float32)[0])
+            q = block_error_codes(x, rec, eps, codec.block_dim)
+            codes = np.empty_like(q)
+            codes[rank] = q
+            parts.append(pack_codes(codes))
+        return np.concatenate(parts)
 
     idxs = list(np.ndindex(*grid))
     with ThreadPoolExecutor(threads) as ex:
         rows = list(ex.map(one, idxs))
 
     meta[...] = np.stack(rows).reshape(*grid, size)
-    arr.update_attributes({META_ATTR: path, META_T_CHUNK_ATTR: t_chunk})
+    source = dict(
+        codec=codec.to_dict(),
+        shape=list(arr.shape),
+        chunks=list(chunk),
+        chunk_crc32=chunk_crc32(arr),
+    )
+    arr.update_attributes(
+        {META_ATTR: path, META_T_CHUNK_ATTR: t_chunk, META_SOURCE_ATTR: source}
+    )
     return meta
+
+
+def chunk_crc32(arr: zarr.Array, concurrency: int = 16) -> list[int | None]:
+    """CRC32 of every stored chunk object of arr, in C order, None if missing.
+
+    At most `concurrency` chunks are read at once, and each is dropped once its
+    CRC is taken, so memory stays near concurrency chunks, not the whole array.
+    """
+    from zarr.core.buffer import default_buffer_prototype
+    from zarr.core.sync import sync
+
+    grid = [s // c for s, c in zip(arr.shape, arr.metadata.chunk_grid.chunk_shape)]
+    prefix = arr.store_path.path.strip("/")
+    store = arr.store_path.store
+
+    async def one(coord: tuple[int, ...], sem: asyncio.Semaphore) -> int | None:
+        key = arr.metadata.encode_chunk_key(coord)
+        async with sem:
+            buf = await store.get(
+                f"{prefix}/{key}" if prefix else key,
+                prototype=default_buffer_prototype(),
+            )
+            return None if buf is None else zlib.crc32(buf.as_numpy_array())
+
+    async def run() -> list[int | None]:
+        sem = asyncio.Semaphore(concurrency)
+        coords = list(itertools.product(*(range(g) for g in grid)))
+        return list(await asyncio.gather(*(one(c, sem) for c in coords)))
+
+    return sync(run())
+
+
+def check_meta(arr: zarr.Array) -> list[tuple[int, ...]]:
+    """Return the chunks whose stored bytes changed since write_meta built the zone map.
+
+    The zone map describes the payload as it was when write_meta ran, so any
+    chunk written afterwards, as by arr[...] = new_values, makes it stale: a
+    query could then skip or count blocks by bounds that no longer hold. This
+    reads every chunk object and compares its CRC32 with the one write_meta
+    recorded. An empty list means the zone map still matches the payload.
+
+    Raises:
+        ValueError: If arr has no zone map, or one built before write_meta
+            recorded its source, or for another layout.
+    """
+    source = arr.attrs.get(META_SOURCE_ATTR)
+    if not source:
+        raise ValueError("no zone map source recorded; run write_meta again")
+    check_source(arr, source)
+    grid = [s // c for s, c in zip(arr.shape, arr.metadata.chunk_grid.chunk_shape)]
+    coords = list(itertools.product(*(range(g) for g in grid)))
+    now = chunk_crc32(arr)
+    return [c for c, a, b in zip(coords, source["chunk_crc32"], now) if a != b]
+
+
+def check_source(arr: zarr.Array, source: dict[str, Any]) -> None:
+    """Raise ValueError if the zone map was built for another codec, shape or chunks."""
+    codec = find_codec(arr)
+    chunk = [int(x) for x in arr.metadata.chunk_grid.chunk_shape]
+    if (
+        source.get("codec") != codec.to_dict()
+        or source.get("shape") != list(arr.shape)
+        or source.get("chunks") != chunk
+    ):
+        raise ValueError(
+            "the zone map was built for another codec, shape or chunk layout; "
+            "run write_meta again"
+        )

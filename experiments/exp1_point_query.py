@@ -1,7 +1,7 @@
 """Experiment 1: point queries, the full time series of grid points (one year of ERA5).
 
 usage: python exp1_point_query.py run <root> <out.jsonl> [--reps 3]
-       python exp1_point_query.py check <raw.zarr> <root> [--nt N]
+       python exp1_point_query.py check <raw.zarr> <root>
        python exp1_point_query.py one <root> <var> <method> <size> <mode> <n> <seed>
                                       [conc]
 
@@ -28,7 +28,6 @@ from pathlib import Path
 
 import numpy as np
 import zarr
-import zfpy
 from zarr.abc.store import RangeByteRequest, SuffixByteRequest
 from zarr.core.buffer import default_buffer_prototype
 
@@ -37,9 +36,10 @@ from common import (
     GAP_BYTES,
     SHARD,
     codec,
-    load_era5,
+    load_point,
     open_counted,
     query,
+    start_run,
     store_url,
 )
 
@@ -176,8 +176,7 @@ async def q_chunks(arr, pts, conc, kind, sem=None):
         if kind == "zstd":
             out[t, i] = c.decode_many(data, [0], [len(data)], raw).reshape(ch)
         else:
-            # zfpy only takes bytes, so copy here, on the worker thread
-            out[t, i] = zfpy.decompress_numpy(bytes(data)).reshape(ch)
+            out[t, i] = c.zfp_decode(data, raw).reshape(ch)
 
     async def one(t, i, cy, cx):
         key = query.full_key(arr, arr.metadata.encode_chunk_key((t, cy, cx)))
@@ -316,9 +315,15 @@ def one(root, var, method, size, mode, n, seed, conc=128):
     print(json.dumps(out))
 
 
-def check(raw, root, nt=None):
-    """Every method must return exactly the stored values of the requested points."""
-    a = load_era5(raw, "t2m", nt)
+def check(raw, root):
+    """Every method must return exactly the stored values of the requested points.
+
+    Every point store holds the same 512-step range, which load_point returns.
+    """
+    a = load_point(raw, "t2m")
+    for method, size in METHODS:
+        arr, _ = open_counted(store_url(root, "t2m", method, size))
+        assert arr.shape == a.shape, (method, size, arr.shape, a.shape)
     for method, size in METHODS:
         arr, _ = open_counted(store_url(root, "t2m", method, size))
         lossless = method.startswith("zshard") or method == "zstd"
@@ -351,6 +356,7 @@ def jobs_for(reps):
 
 
 def run(root, out_path, reps=3):
+    run_id = start_run(out_path, script="exp1", root=root, reps=reps)
     jobs = jobs_for(reps)
     keys = ("method", "size", "mode", "n", "rep")
     try:
@@ -370,7 +376,9 @@ def run(root, out_path, reps=3):
         out = json.loads(p.stdout.strip().splitlines()[-1])
         if mode != "latency":
             out.pop("lat", None)
-        rec = dict(method=method, size=size, mode=mode, n=n, rep=r, **out)
+        rec = dict(
+            method=method, size=size, mode=mode, n=n, rep=r, run_id=run_id, **out
+        )
         with open(out_path, "a") as f:
             f.write(json.dumps(rec) + "\n")
         if i % 30 == 0 or i == len(todo):
@@ -393,9 +401,8 @@ if __name__ == "__main__":
     c = sub.add_parser("check")
     c.add_argument("raw")
     c.add_argument("root")
-    c.add_argument("--nt", type=int)
     args = ap.parse_args()
     if args.cmd == "run":
         run(args.root, args.out, args.reps)
     else:
-        check(args.raw, args.root, args.nt)
+        check(args.raw, args.root)
