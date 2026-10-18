@@ -17,7 +17,6 @@ from pathlib import Path
 import numcodecs.blosc
 import numpy as np
 import zarr
-import zfpy
 from zarr.abc.store import RangeByteRequest
 from zarr.core.buffer import default_buffer_prototype
 
@@ -25,6 +24,26 @@ from common import EMPTY, GAP_BYTES, query
 
 HERE = Path(__file__).resolve().parent
 POOL = ThreadPoolExecutor(os.cpu_count() or 4)
+
+
+def zfp_prefix():
+    """The libzfp install prefix, found as setup.py finds it."""
+    for c in (os.environ.get("ZFP_DIR"), Path.home() / ".local", "/usr/local", "/usr"):
+        if c and (Path(c) / "include" / "zfp.h").exists():
+            return Path(c)
+    raise RuntimeError("could not find zfp.h; set ZFP_DIR to the libzfp install prefix")
+
+
+def build_zfp_count():
+    """Compile zfp_count.c against the libzfp that skipzfp itself links."""
+    src = HERE / "zfp_count.c"
+    so = src.with_suffix(".so")
+    if not so.exists() or so.stat().st_mtime < src.stat().st_mtime:
+        p = zfp_prefix()
+        cmd = ["gcc", "-O3", "-fPIC", "-shared", str(src), "-o", str(so)]
+        cmd += [f"-I{p}/include", f"-L{p}/lib", "-lzfp", f"-Wl,-rpath,{p}/lib"]
+        subprocess.run(cmd, check=True)
+    return so
 
 
 class _C:
@@ -64,6 +83,40 @@ class _C:
         ]
         blosc = ctypes.CDLL(numcodecs.blosc.__file__)
         self.dec = ctypes.cast(blosc.blosc_decompress_ctx, ctypes.c_void_p).value
+        self.zfp = ctypes.CDLL(str(build_zfp_count()))
+        self.zfp.zc_count_gt.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_double,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.zfp.zc_decode.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_void_p,
+        ]
+
+    def zfp_decode(self, data, raw_nbytes):
+        src = np.frombuffer(data, np.uint8)
+        out = np.empty(raw_nbytes // 4, np.float32)
+        code = self.zfp.zc_decode(
+            src.ctypes.data, src.size, raw_nbytes, out.ctypes.data
+        )
+        if code:
+            raise RuntimeError(f"zc_decode failed: {code}")
+        return out
+
+    def zfp_count(self, data, raw_nbytes, th):
+        src = np.frombuffer(data, np.uint8)  # a buffer view, no copy
+        out = ctypes.c_size_t()
+        code = self.zfp.zc_count_gt(
+            src.ctypes.data, src.size, raw_nbytes, th, ctypes.byref(out)
+        )
+        if code:
+            raise RuntimeError(f"zc_count_gt failed: {code}")
+        return int(out.value)
 
     def blosc(self, data, offs, sizes, raw_nbytes, th):
         src = np.frombuffer(data, np.uint8)  # bytes or a buffer view, no copy
@@ -120,9 +173,31 @@ def lib():
 
 
 async def open_side(arr, name):
+    # every store here is Zarr v3, so only zarr.json is requested, as for the array
     return await zarr.api.asynchronous.open_array(
-        store=arr.store_path.store, path=name, mode="r"
+        store=arr.store_path.store, path=name, mode="r", zarr_format=3
     )
+
+
+def side_names(method):
+    """The side arrays that hold a baseline's zone map and shard index."""
+    if method in ("zstd_zm", "zfpacc_zm"):
+        return ("data_stats",)
+    if method == "zshard_izm":
+        return ("data_stats", "data_index")
+    return ()
+
+
+async def open_sides(arr, method):
+    """Open the side arrays of a baseline, as a dict from name to array.
+
+    exp2 opens them together with the array and before the query is timed, as
+    the array itself is, since SkipZFP reads its zone map objects by key and
+    opens nothing at query time.
+    """
+    names = side_names(method)
+    arrays = await asyncio.gather(*(open_side(arr, n) for n in names))
+    return dict(zip(names, arrays))
 
 
 async def read_full(store, keys, conc):
@@ -168,8 +243,8 @@ def chunk_counter(kind, raw_nbytes, th):
     c = lib()
     if kind == "zstd":
         return lambda data, _: c.blosc(data, [0], [len(data)], raw_nbytes, th)
-    # zfpy only takes bytes, so copy here, on the worker thread
-    return lambda data, _: c.f32(zfpy.decompress_numpy(bytes(data)), th)
+    # libzfp straight from the response buffer, as zstd goes straight to blosc
+    return lambda data, _: c.zfp_count(data, raw_nbytes, th)
 
 
 def _keys(arr, coords):
@@ -179,9 +254,9 @@ def _keys(arr, coords):
     ]
 
 
-async def chunk_zm(arr, th, conc, kind):
+async def chunk_zm(arr, side, th, conc, kind):
     t0 = time.perf_counter()
-    stats_arr = await open_side(arr, "data_stats")
+    stats_arr = side["data_stats"]
     stats = np.asarray(await stats_arr.getitem(...), np.float64)
     eps = float(stats_arr.attrs.get("eps") or 0.0)
     t_meta = time.perf_counter() - t0
@@ -249,11 +324,9 @@ async def full_scan(arr, th, conc, kind):
     )
 
 
-async def inner_zm(arr, th, conc):
+async def inner_zm(arr, side, th, conc, gap=GAP_BYTES):
     t0 = time.perf_counter()
-    stats_arr, index_arr = await asyncio.gather(
-        open_side(arr, "data_stats"), open_side(arr, "data_index")
-    )
+    stats_arr, index_arr = side["data_stats"], side["data_index"]
     stats, index = await asyncio.gather(stats_arr.getitem(...), index_arr.getitem(...))
     grid = stats.shape[:-2]
     n_inner = stats.shape[-2]
@@ -281,7 +354,7 @@ async def inner_zm(arr, th, conc):
     if len(offs) > 1:
         run_end = np.maximum.accumulate(ends)
         brk[1:] = (shard[1:] != shard[:-1]) | (
-            offs[1:].astype(np.int64) - run_end[:-1].astype(np.int64) > GAP_BYTES
+            offs[1:].astype(np.int64) - run_end[:-1].astype(np.int64) > gap
         )
     starts = np.flatnonzero(brk)
     stops = np.r_[starts[1:], len(offs)]

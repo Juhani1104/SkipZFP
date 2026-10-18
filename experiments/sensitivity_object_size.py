@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from common import VARS, load_era5, query
+from common import VARS, load_point, query, start_run
 
 SELECTIVITIES = [0.0001, 0.001, 0.01, 0.05, 0.1, 0.2, 0.5]
 CONFIGS = {"k8": ("k8", 0), "k64t_split4": ("k64t", 4 << 20)}
@@ -71,9 +71,10 @@ def one(url, th, split):
 
 
 def run(raw, root, out_path, reps):
+    run_id = start_run(out_path, raw, script="sensitivity", root=root, reps=reps)
     ths = {}
     for var in VARS:
-        a = load_era5(raw, var)
+        a = load_point(raw, var)
         ths[var] = [float(np.quantile(a, 1 - s)) for s in SELECTIVITIES]
         del a
     jobs = [
@@ -104,7 +105,7 @@ def run(raw, root, out_path, reps):
             print("failed", v, cfg, s, p.stderr[-800:], flush=True)
             continue
         result = json.loads(p.stdout.strip().splitlines()[-1])
-        rec = dict(var=v, cfg=cfg, sel=s, rep=r, threshold=th, **result)
+        rec = dict(var=v, cfg=cfg, sel=s, rep=r, threshold=th, run_id=run_id, **result)
         with open(out_path, "a") as f:
             f.write(json.dumps(rec) + "\n")
         if i % 35 == 0 or i == len(todo):
