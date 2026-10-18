@@ -174,7 +174,10 @@ static void classify_unit(
     }
 }
 
-int szfp_plan_range_chunks(
+/* classify every block for lo < x <= hi and list the blocks a query reads,
+ * sorted by (chunk, block): the MAYBE blocks, plus the IN blocks when keep_in
+ * is set. When states is not NULL, it receives each listed block's state. */
+static int plan_blocks(
     const unsigned char* meta,
     size_t meta_size,
     size_t ux,
@@ -187,8 +190,10 @@ int szfp_plan_range_chunks(
     double lo,
     double hi,
     int threads,
+    int keep_in,
     uint32_t* maybe_chunks,
     uint32_t* maybe_blocks,
+    unsigned char* states_out,
     size_t maybe_cap,
     size_t* out_maybe,
     size_t* out_in,
@@ -275,7 +280,7 @@ int szfp_plan_range_chunks(
         for (size_t b = 0; b < blocks_per_chunk; b++) {
             n_in += st[b] == 1;
             n_out += st[b] == 0;
-            m += st[b] == 2;
+            m += st[b] == 2 || (keep_in && st[b] == 1);
         }
         n_maybe_chunk[cid + 1u] = m;
     }
@@ -285,7 +290,7 @@ int szfp_plan_range_chunks(
         n_maybe_chunk[cid + 1u] += n_maybe_chunk[cid];
     }
 
-    /* pass 2: write MAYBE blocks, already sorted by (chunk, block) */
+    /* pass 2: write the listed blocks, already sorted by (chunk, block) */
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) num_threads(workers)
 #endif
@@ -294,9 +299,12 @@ int szfp_plan_range_chunks(
         size_t k = n_maybe_chunk[cid];
 
         for (size_t b = 0; b < blocks_per_chunk; b++) {
-            if (st[b] == 2) {
+            if (st[b] == 2 || (keep_in && st[b] == 1)) {
                 maybe_chunks[k] = (uint32_t)cid;
                 maybe_blocks[k] = (uint32_t)b;
+                if (states_out != NULL) {
+                    states_out[k] = st[b];
+                }
                 k++;
             }
         }
@@ -309,6 +317,99 @@ int szfp_plan_range_chunks(
     free(states);
     free(n_maybe_chunk);
     return SZ_OK;
+}
+
+int szfp_plan_range_chunks(
+    const unsigned char* meta,
+    size_t meta_size,
+    size_t ux,
+    size_t uy,
+    size_t uz,
+    size_t sx,
+    size_t sy,
+    size_t sz,
+    size_t blocks_per_unit,
+    double lo,
+    double hi,
+    int threads,
+    uint32_t* maybe_chunks,
+    uint32_t* maybe_blocks,
+    size_t maybe_cap,
+    size_t* out_maybe,
+    size_t* out_in,
+    size_t* out_out
+) {
+    return plan_blocks(
+        meta,
+        meta_size,
+        ux,
+        uy,
+        uz,
+        sx,
+        sy,
+        sz,
+        blocks_per_unit,
+        lo,
+        hi,
+        threads,
+        0,
+        maybe_chunks,
+        maybe_blocks,
+        NULL,
+        maybe_cap,
+        out_maybe,
+        out_in,
+        out_out
+    );
+}
+
+int szfp_plan_read_chunks(
+    const unsigned char* meta,
+    size_t meta_size,
+    size_t ux,
+    size_t uy,
+    size_t uz,
+    size_t sx,
+    size_t sy,
+    size_t sz,
+    size_t blocks_per_unit,
+    double lo,
+    double hi,
+    int threads,
+    uint32_t* read_chunks,
+    uint32_t* read_blocks,
+    unsigned char* read_states,
+    size_t read_cap,
+    size_t* out_read,
+    size_t* out_in,
+    size_t* out_out
+) {
+    if (read_states == NULL) {
+        return SZ_ERR_NULL;
+    }
+
+    return plan_blocks(
+        meta,
+        meta_size,
+        ux,
+        uy,
+        uz,
+        sx,
+        sy,
+        sz,
+        blocks_per_unit,
+        lo,
+        hi,
+        threads,
+        1,
+        read_chunks,
+        read_blocks,
+        read_states,
+        read_cap,
+        out_read,
+        out_in,
+        out_out
+    );
 }
 
 /* x > threshold is the range threshold < x <= +inf */
@@ -702,4 +803,137 @@ int szfp_count_offsets(
         INFINITY,
         out_count
     );
+}
+
+/* add one decoded block to an aggregate for lo < x <= hi. Each original value
+ * lies within eps of its decoded value r; in an IN block every original value
+ * is known to match, while in a MAYBE block it is classified from r and eps. */
+static void aggregate_block(
+    const float* v,
+    size_t n,
+    double eps,
+    int in_block,
+    double lo,
+    double hi,
+    SzAggregate* acc
+) {
+    for (size_t i = 0; i < n; i++) {
+        double r = (double)v[i];
+        double a = r - eps;
+        double b = r + eps;
+
+        acc->abs_total += fabs(r) + eps;
+
+        if (in_block || in_range(v[i], lo, hi)) {
+            acc->rec_count++;
+            acc->rec_sum += r;
+        }
+
+        if (in_block || (a > lo && b <= hi)) {
+            /* the original value matches and lies in [a, b] within the range */
+            acc->sure_count++;
+            acc->sure_sum_lo += a > lo ? a : lo;
+            acc->sure_sum_hi += b < hi ? b : hi;
+        } else if (!(b <= lo || a > hi)) {
+            /* it may or may not match; if it does, it lies in (lo, hi] and [a, b] */
+            double low = a > lo ? a : lo;
+            double high = b < hi ? b : hi;
+
+            acc->maybe_count++;
+            acc->maybe_sum_neg += low < 0.0 ? low : 0.0;
+            acc->maybe_sum_pos += high > 0.0 ? high : 0.0;
+            if (low < acc->maybe_min) {
+                acc->maybe_min = low;
+            }
+            if (high > acc->maybe_max) {
+                acc->maybe_max = high;
+            }
+        }
+    }
+}
+
+int szfp_aggregate_offsets_range(
+    const unsigned char* buf,
+    size_t buf_size,
+    const uint64_t* offsets,
+    const float* eps,
+    const unsigned char* in_block,
+    size_t n,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double lo,
+    double hi,
+    SzAggregate* out
+) {
+    size_t nval;
+    size_t need_bytes;
+    float vals[64];
+
+    if (out == NULL) {
+        return SZ_ERR_NULL;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->maybe_min = INFINITY;
+    out->maybe_max = -INFINITY;
+
+    if (n == 0) {
+        return SZ_OK;
+    }
+
+    if (buf == NULL || offsets == NULL || eps == NULL || in_block == NULL) {
+        return SZ_ERR_NULL;
+    }
+
+    if (!block_layout(block_dim, rate, &nval, &need_bytes) || nval > 64 ||
+        block_dim != 4) {
+        return SZ_ERR_ARG;
+    }
+
+    if (block_nbytes != need_bytes) {
+        return SZ_ERR_SIZE;
+    }
+
+    for (size_t i = 0; i < n; i++) {
+        if (offsets[i] > buf_size || buf_size - offsets[i] < block_nbytes) {
+            return SZ_ERR_SIZE;
+        }
+        if (!(eps[i] >= 0.0f) || !isfinite(eps[i])) {
+            return SZ_ERR_ARG;
+        }
+    }
+
+    if (szfp_fast_ok(block_dim, rate, block_nbytes)) {
+        for (size_t i = 0; i < n; i++) {
+            szfp_fast_decode(buf + offsets[i], block_nbytes, vals);
+            aggregate_block(vals, nval, (double)eps[i], in_block[i] != 0, lo, hi, out);
+        }
+    } else {
+        bitstream* stream = stream_open((void*)buf, buf_size);
+        zfp_stream* zfp;
+
+        if (stream == NULL) {
+            return SZ_ERR_ZFP;
+        }
+
+        zfp = zfp_stream_open(stream);
+        if (zfp == NULL) {
+            stream_close(stream);
+            return SZ_ERR_ZFP;
+        }
+
+        zfp_stream_set_rate(zfp, rate, zfp_type_float, 3, 0);
+
+        for (size_t i = 0; i < n; i++) {
+            stream_rseek(stream, (bitstream_offset)offsets[i] * CHAR_BIT);
+            zfp_decode_block_float_3(zfp, vals);
+            aggregate_block(vals, nval, (double)eps[i], in_block[i] != 0, lo, hi, out);
+        }
+
+        zfp_stream_close(zfp);
+        stream_close(stream);
+    }
+
+    return SZ_OK;
 }

@@ -249,4 +249,101 @@ int szfp_count_offsets_range(
     size_t* out_count
 );
 
+/**
+ * @brief Classify every block for lo < x <= hi and list the blocks an
+ *        aggregate must read: the IN blocks as well as the MAYBE blocks.
+ *
+ * An aggregate such as SUM needs the values of every matching block, so
+ * unlike szfp_plan_range_chunks() it lists the IN blocks too. Both kinds come
+ * out together, sorted by chunk and then by position in the chunk, and
+ * read_states tells them apart (1 = IN, 2 = MAYBE).
+ *
+ * @param[out] read_chunks Chunk id of each listed block.
+ * @param[out] read_blocks Position of each listed block in its chunk.
+ * @param[out] read_states State of each listed block, 1 for IN or 2 for MAYBE.
+ * @param[in]  read_cap    Length of the three output arrays, which must be
+ *                         at least the total number of blocks.
+ * @param[out] out_read    Number of blocks listed.
+ * @param[out] out_in      Number of IN blocks.
+ * @param[out] out_out     Number of OUT blocks.
+ *
+ * The other parameters and the return codes are those of
+ * szfp_plan_range_chunks().
+ */
+int szfp_plan_read_chunks(
+    const unsigned char* meta,
+    size_t meta_size,
+    size_t ux,
+    size_t uy,
+    size_t uz,
+    size_t sx,
+    size_t sy,
+    size_t sz,
+    size_t blocks_per_unit,
+    double lo,
+    double hi,
+    int threads,
+    uint32_t* read_chunks,
+    uint32_t* read_blocks,
+    unsigned char* read_states,
+    size_t read_cap,
+    size_t* out_read,
+    size_t* out_in,
+    size_t* out_out
+);
+
+/**
+ * @brief Running totals of a filtered aggregate over lo < x <= hi.
+ *
+ * The rec_* fields are exact for the decoded values. The other fields bound
+ * the same aggregate over the original values, using that each original value
+ * lies within its unit's error bound eps of the decoded one: a "sure" value
+ * matches for certain, and a "maybe" value may or may not.
+ */
+typedef struct {
+    uint64_t rec_count;   /* decoded values that match */
+    double rec_sum;       /* their sum */
+    uint64_t sure_count;  /* original values that match for certain */
+    double sure_sum_lo;   /* lower bound on their sum */
+    double sure_sum_hi;   /* upper bound on their sum */
+    uint64_t maybe_count; /* original values that may match */
+    double maybe_sum_neg; /* sum of min(0, low) over them, low being the */
+    double maybe_sum_pos; /* smallest value each could have if it matches, and */
+                          /* sum of max(0, high) with high the largest */
+    double maybe_min;     /* smallest low, or +inf if there is none */
+    double maybe_max;     /* largest high, or -inf if there is none */
+    double abs_total;     /* sum of |r| + eps over every value seen, which */
+                          /* bounds the rounding error of the sums */
+} SzAggregate;
+
+/**
+ * @brief Decode the blocks at the given offsets in a buffer and aggregate the
+ *        values with lo < x <= hi, see SzAggregate.
+ *
+ * Like szfp_count_offsets_range(), it runs on one thread.
+ *
+ * @param[in]  eps      Error bound of each block's unit.
+ * @param[in]  in_block Nonzero for a block whose values all match (IN), zero
+ *                      for a MAYBE block.
+ * @param[out] out      Totals over these blocks.
+ *
+ * The other parameters are those of szfp_count_offsets_range(), and so are
+ * the return codes, plus SZ_ERR_ARG if an error bound is negative or not
+ * finite.
+ */
+int szfp_aggregate_offsets_range(
+    const unsigned char* buf,
+    size_t buf_size,
+    const uint64_t* offsets,
+    const float* eps,
+    const unsigned char* in_block,
+    size_t n,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double lo,
+    double hi,
+    SzAggregate* out
+);
+
 #endif

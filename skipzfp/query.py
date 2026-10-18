@@ -26,6 +26,24 @@ from .codec import META_ATTR, META_T_CHUNK_ATTR, find_codec, meta_size
 from .codec import native as codec_native
 
 
+class _Aggregate(ctypes.Structure):
+    """SzAggregate in csrc/query.h: running totals of a filtered aggregate."""
+
+    _fields_ = [
+        ("rec_count", ctypes.c_uint64),
+        ("rec_sum", ctypes.c_double),
+        ("sure_count", ctypes.c_uint64),
+        ("sure_sum_lo", ctypes.c_double),
+        ("sure_sum_hi", ctypes.c_double),
+        ("maybe_count", ctypes.c_uint64),
+        ("maybe_sum_neg", ctypes.c_double),
+        ("maybe_sum_pos", ctypes.c_double),
+        ("maybe_min", ctypes.c_double),
+        ("maybe_max", ctypes.c_double),
+        ("abs_total", ctypes.c_double),
+    ]
+
+
 class _Native:
     """ctypes bindings for the query functions in csrc/query.c."""
 
@@ -86,6 +104,38 @@ class _Native:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         self.lib.szfp_count_offsets_range.restype = ctypes.c_int
+
+        self.lib.szfp_plan_read_chunks.argtypes = [
+            ctypes.POINTER(ctypes.c_ubyte),
+            *[ctypes.c_size_t] * 8,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.lib.szfp_plan_read_chunks.restype = ctypes.c_int
+
+        self.lib.szfp_aggregate_offsets_range.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_double,
+            ctypes.c_int,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.POINTER(_Aggregate),
+        ]
+        self.lib.szfp_aggregate_offsets_range.restype = ctypes.c_int
 
     def plan_chunks(
         self,
@@ -233,6 +283,100 @@ class _Native:
         )
         check(code, "szfp_count_offsets_range")
         return int(out.value)
+
+    def plan_read(
+        self,
+        meta: np.ndarray,
+        meta_size: int,
+        unit_grid: tuple[int, int, int],
+        subs: tuple[int, int, int],
+        blocks_per_unit: int,
+        lo: float,
+        hi: float,
+        threads: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+        """Classify blocks for lo < x <= hi and return the IN and MAYBE blocks.
+
+        It returns the (chunk, block) ids of the listed blocks in chunk order,
+        the state of each (1 = IN, 2 = MAYBE), and the IN and OUT counts.
+        """
+        src = np.ascontiguousarray(meta, dtype=np.uint8)
+        cap = int(np.prod(unit_grid)) * blocks_per_unit
+        chunk_ids = np.empty(cap, dtype=np.uint32)
+        block_ids = np.empty(cap, dtype=np.uint32)
+        states = np.empty(cap, dtype=np.uint8)
+
+        n_read = ctypes.c_size_t()
+        n_in = ctypes.c_size_t()
+        n_out = ctypes.c_size_t()
+
+        code = self.lib.szfp_plan_read_chunks(
+            src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
+            meta_size,
+            *unit_grid,
+            *subs,
+            blocks_per_unit,
+            lo,
+            hi,
+            threads,
+            chunk_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
+            block_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
+            states.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
+            cap,
+            ctypes.byref(n_read),
+            ctypes.byref(n_in),
+            ctypes.byref(n_out),
+        )
+        check(code, "szfp_plan_read_chunks")
+
+        n = int(n_read.value)
+        return (
+            chunk_ids[:n],
+            block_ids[:n],
+            states[:n],
+            int(n_in.value),
+            int(n_out.value),
+        )
+
+    def aggregate_offsets(
+        self,
+        data: Any,
+        offsets: np.ndarray,
+        eps: np.ndarray,
+        in_block: np.ndarray,
+        block_size: int,
+        rate: float,
+        block_dim: int,
+        lo: float,
+        hi: float,
+    ) -> _Aggregate:
+        """Decode the blocks at the given byte offsets and aggregate lo < x <= hi.
+
+        eps is each block's error bound and in_block marks the IN blocks. data
+        is any contiguous bytes-like object, read in place without a copy.
+        """
+        src = np.frombuffer(data, dtype=np.uint8)
+        offs = np.ascontiguousarray(offsets, dtype=np.uint64)
+        e = np.ascontiguousarray(eps, dtype=np.float32)
+        flag = np.ascontiguousarray(in_block, dtype=np.uint8)
+        out = _Aggregate()
+
+        code = self.lib.szfp_aggregate_offsets_range(
+            src.ctypes.data,
+            src.size,
+            offs.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
+            e.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            flag.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
+            len(offs),
+            block_size,
+            rate,
+            block_dim,
+            lo,
+            hi,
+            ctypes.byref(out),
+        )
+        check(code, "szfp_aggregate_offsets_range")
+        return out
 
 
 _NATIVE: _Native | None = None
