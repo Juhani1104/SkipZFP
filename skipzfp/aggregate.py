@@ -23,6 +23,7 @@ import zarr
 from zarr.core.sync import sync
 
 from .query import (
+    ByteBudget,
     QueryOptions,
     _MergedRange,
     _Range,
@@ -30,12 +31,14 @@ from .query import (
     full_key,
     get_layout,
     merge_ranges,
+    meta_objects,
     native,
     open_skipzfp,
     plan_meta,
     pool,
     range_bounds,
     read_meta,
+    read_meta_object,
     read_one,
 )
 
@@ -80,6 +83,9 @@ class AggregateResult:
         decode_seconds: Time spent decoding, summed over reads running in
             parallel, so it can exceed the wall time.
         total_seconds: Wall time of the whole query.
+        peak_inflight_bytes: Most payload bytes reserved at once, from when a
+            read starts until its blocks are decoded; an upper bound on the
+            payload buffers, see QueryResult.peak_inflight_bytes.
         read_blocks: With return_blocks=True, the (chunk, block) id of every
             block read, one row each in reading order, where the chunk id
             counts chunks in C order and the block id is the block's position
@@ -107,6 +113,7 @@ class AggregateResult:
     payload_read_seconds: float
     decode_seconds: float
     total_seconds: float
+    peak_inflight_bytes: int = 0
     read_blocks: np.ndarray | None = None
 
     @property
@@ -118,52 +125,6 @@ class AggregateResult:
     def range_requests(self) -> int:
         """Total read requests for the zone map and the compressed blocks."""
         return self.metadata_requests + self.payload_requests
-
-
-def block_eps(
-    meta: np.ndarray,
-    meta_size: int,
-    unit_grid: Sequence[int],
-    subs: Sequence[int],
-    grid_shape: Sequence[int],
-    blocks_per_unit: int,
-    chunk_ids: np.ndarray,
-    block_ids: np.ndarray,
-) -> np.ndarray:
-    """Return the error bound of each (chunk, block).
-
-    meta holds single-layer records, as plan_meta returns them, so the unit's
-    error bound is the float at bytes 8 to 12 of each record. When the
-    records end with 4-bit codes, a block's bound is eps * q / 15, computed as
-    the C planner does. Blocks are numbered unit by unit inside a chunk, as
-    in the C planner.
-    """
-    rec = np.ascontiguousarray(meta, dtype=np.uint8).reshape(-1, meta_size)
-    eps = np.ascontiguousarray(rec[:, 8:12]).view(np.float32).reshape(-1)
-    n_codes = meta_size - 12 - 2 * blocks_per_unit
-    if n_codes not in (0, (blocks_per_unit + 1) // 2):
-        raise ValueError("zone map records have an unexpected size")
-
-    _, gy, gz = (int(g) for g in grid_shape)
-    sx, sy, sz = (int(s) for s in subs)
-    _, uy, uz = (int(u) for u in unit_grid)
-    c = chunk_ids.astype(np.int64)
-    sub = block_ids.astype(np.int64) // blocks_per_unit
-    ix = (c // (gy * gz)) * sx + sub // (sy * sz)
-    iy = ((c // gz) % gy) * sy + (sub // sz) % sy
-    iz = (c % gz) * sz + sub % sz
-    uid = (ix * uy + iy) * uz + iz
-    if not n_codes:
-        return eps[uid]
-    pos = block_ids.astype(np.int64) % blocks_per_unit
-    codes = rec[uid, 12 + 2 * blocks_per_unit + pos // 2]
-    q = (codes >> (4 * (pos % 2))) & 15
-    bound = eps[uid].astype(np.float64) * q.astype(np.float64) / 15.0
-    # the C aggregate takes a float32 bound, so round it up to stay safe
-    out = bound.astype(np.float32)
-    low = out.astype(np.float64) < bound
-    out[low] = np.nextafter(out[low], np.float32(np.inf))
-    return out
 
 
 async def stream_aggregate(
@@ -179,14 +140,19 @@ async def stream_aggregate(
     hi: float,
     concurrency: int,
     threads: int,
+    budget: ByteBudget | None = None,
+    copy: bool = False,
+    sem: asyncio.Semaphore | None = None,
 ) -> tuple[list[tuple[Any, int]], int, float]:
     """Read each merged range and aggregate lo < x <= hi as soon as it arrives.
 
     It returns the totals of every read with its number of blocks, the bytes
-    read, and the decode seconds summed over all reads.
+    read, and the decode seconds summed over all reads. Pass sem to share the
+    concurrency limit with other reads.
     """
     loop = asyncio.get_running_loop()
-    sem = asyncio.Semaphore(concurrency)
+    sem = sem or asyncio.Semaphore(concurrency)
+    budget = budget or ByteBudget()
 
     def agg(data: np.ndarray, req: _MergedRange) -> tuple[Any, float]:
         t0 = time.perf_counter()
@@ -206,11 +172,17 @@ async def stream_aggregate(
         return out, time.perf_counter() - t0
 
     async def one(req: _MergedRange) -> tuple[Any, int, int, float]:
-        data = await read_one(
-            store, _Range(key=req.key, start=req.start, end=req.end), sem
-        )
-        out, sec = await loop.run_in_executor(pool(threads), agg, data, req)
-        return out, req.item_end - req.item_start, len(data), sec
+        size = req.end - req.start
+        await budget.acquire(size)
+        try:
+            data = await read_one(
+                store, _Range(key=req.key, start=req.start, end=req.end), sem, copy
+            )
+            out, sec = await loop.run_in_executor(pool(threads), agg, data, req)
+            del data  # drop the buffer before giving its bytes back
+        finally:
+            await budget.release(size)
+        return out, req.item_end - req.item_start, size, sec
 
     parts = await asyncio.gather(*(one(r) for r in merged))
     return (
@@ -295,81 +267,73 @@ async def _aggregate_async(
         raise ValueError(
             "aggregates read layer 0 only; pass layer=0 for a layered array"
         )
-    rate = lt.layers[0]
-    block_size = lt.layer_bytes[0]
     keys = [
         full_key(arr, arr.metadata.encode_chunk_key(c))
         for c in chunk_coords(lt.grid_shape)
     ]
+    mo = meta_objects(arr, lt)
+    if (
+        opts.pipeline
+        and opts.meta_by_key
+        and mo is not None
+        and mo.t_chunk % lt.unit_grid_per_chunk[0] == 0
+    ):
+        return await _aggregate_pipelined(
+            arr, lt, mo, lo, hi, opts, keys, t0, return_blocks
+        )
 
     # 1. read the zone map
     t1 = time.perf_counter()
-    meta, meta_bytes, meta_requests = await read_meta(arr, lt, opts.request_concurrency)
+    meta, meta_bytes, meta_requests = await read_meta(
+        arr, lt, opts.request_concurrency, opts.meta_by_key
+    )
     meta_read_sec = time.perf_counter() - t1
 
     # 2. plan: list the IN and MAYBE blocks, with each one's error bound
     t1 = time.perf_counter()
-    single = plan_meta(meta, lt, 0)
-    meta_size = lt.meta_size - 4 * (len(lt.layers) - 1)
-    chunk_ids, block_ids, states, n_in, n_out = await asyncio.to_thread(
+    chunk_ids, block_ids, states, n_in, n_out, eps = await asyncio.to_thread(
         native().plan_read,
-        single,
-        meta_size,
+        plan_meta(meta, lt, 0),
+        lt.meta_size - 4 * (len(lt.layers) - 1),
         lt.unit_grid,
         lt.unit_grid_per_chunk,
         lt.blocks_per_unit,
         lo,
         hi,
         opts.threads,
+        True,
     )
-    eps = block_eps(
-        single,
-        meta_size,
-        lt.unit_grid,
-        lt.unit_grid_per_chunk,
-        lt.grid_shape,
-        lt.blocks_per_unit,
-        chunk_ids,
-        block_ids,
-    )
-    in_block = (states == 1).astype(np.uint8)
     plan_sec = time.perf_counter() - t1
 
-    # 3. read and aggregate the listed blocks; the planner lists them in chunk
-    # order, so merge_ranges keeps that order and eps and in_block still line up
-    merged, blocks = merge_ranges(
-        keys, chunk_ids, block_ids, block_size, opts.merge_gap_blocks
-    )
-    if len(blocks) and blocks is not block_ids:
-        raise RuntimeError("the planner must list blocks in chunk order")
+    # 3. read and aggregate the listed blocks
     t1 = time.perf_counter()
-    parts, payload_bytes, decode_sec = await stream_aggregate(
+    budget = ByteBudget(opts.max_inflight_bytes)
+    parts, n_reqs, payload_bytes, decode_sec = await _read_listed(
         arr.store_path.store,
-        merged,
-        blocks,
+        keys,
+        lt,
+        chunk_ids,
+        block_ids,
+        states,
         eps,
-        in_block,
-        block_size,
-        rate,
-        lt.block_dim,
         lo,
         hi,
-        opts.request_concurrency,
-        opts.threads,
+        opts,
+        budget,
     )
     payload_read_sec = time.perf_counter() - t1
 
-    useful_bytes = len(blocks) * block_size
+    useful_bytes = len(block_ids) * lt.layer_bytes[0]
     return AggregateResult(
         **combine(parts, lt.values_per_block),
         in_blocks=n_in,
         out_blocks=n_out,
-        maybe_blocks=len(blocks) - n_in,
+        maybe_blocks=len(block_ids) - n_in,
         total_blocks=len(keys) * lt.blocks_per_chunk,
         metadata_bytes_read=meta_bytes,
         payload_bytes_read=payload_bytes,
         metadata_requests=meta_requests,
-        payload_requests=len(merged),
+        payload_requests=n_reqs,
         useful_payload_bytes=useful_bytes,
         payload_overread_bytes=payload_bytes - useful_bytes,
         metadata_read_seconds=meta_read_sec,
@@ -377,7 +341,148 @@ async def _aggregate_async(
         payload_read_seconds=payload_read_sec,
         decode_seconds=decode_sec,
         total_seconds=time.perf_counter() - t0,
+        peak_inflight_bytes=budget.peak,
         read_blocks=np.column_stack((chunk_ids, block_ids)) if return_blocks else None,
+    )
+
+
+async def _read_listed(
+    store: Any,
+    keys: Sequence[str],
+    lt: Any,
+    chunk_ids: np.ndarray,
+    block_ids: np.ndarray,
+    states: np.ndarray,
+    eps: np.ndarray,
+    lo: float,
+    hi: float,
+    opts: QueryOptions,
+    budget: ByteBudget,
+    sem: asyncio.Semaphore | None = None,
+) -> tuple[list[tuple[Any, int]], int, int, float]:
+    """Merge the listed blocks into reads, then read and aggregate them.
+
+    The planner lists the blocks in chunk order, so merge_ranges keeps that
+    order and eps and states still line up. It returns the totals of every
+    read, the number of reads, the bytes read and the decode seconds.
+    """
+    merged, blocks = merge_ranges(
+        keys, chunk_ids, block_ids, lt.layer_bytes[0], opts.merge_gap_blocks
+    )
+    if len(blocks) and blocks is not block_ids:
+        raise RuntimeError("the planner must list blocks in chunk order")
+    parts, payload_bytes, decode_sec = await stream_aggregate(
+        store,
+        merged,
+        blocks,
+        eps,
+        (states == 1).astype(np.uint8),
+        lt.layer_bytes[0],
+        lt.layers[0],
+        lt.block_dim,
+        lo,
+        hi,
+        opts.request_concurrency,
+        opts.threads,
+        budget,
+        not opts.zero_copy,
+        sem,
+    )
+    return parts, len(merged), payload_bytes, decode_sec
+
+
+async def _aggregate_pipelined(
+    arr: zarr.Array,
+    lt: Any,
+    mo: Any,
+    lo: float,
+    hi: float,
+    opts: QueryOptions,
+    keys: Sequence[str],
+    t0: float,
+    return_blocks: bool,
+) -> AggregateResult:
+    """Run an aggregate one zone map object at a time, as _query_pipelined does.
+
+    Each object is planned alone and its blocks are read while later objects
+    are still arriving, so only one object's block list is held per object in
+    flight rather than the whole array's. The time fields mean the same as in
+    _query_pipelined.
+    """
+    store = arr.store_path.store
+    sem = asyncio.Semaphore(opts.request_concurrency)
+    budget = ByteBudget(opts.max_inflight_bytes)
+    subs = lt.unit_grid_per_chunk
+    chunks_per_step = lt.grid_shape[1] * lt.grid_shape[2]
+    meta_size = lt.meta_size - 4 * (len(lt.layers) - 1)
+    last_meta = t0
+    first_read = math.inf
+
+    async def one(i: int) -> tuple[Any, ...]:
+        nonlocal last_meta, first_read
+        data = await read_meta_object(store, mo, i, sem)
+        last_meta = max(last_meta, time.perf_counter())
+        u0 = i * mo.t_chunk
+        n_units = min(mo.t_chunk, lt.unit_grid[0] - u0)
+        t1 = time.perf_counter()
+        chunk_ids, block_ids, states, n_in, n_out, eps = await asyncio.to_thread(
+            native().plan_read,
+            plan_meta(data[: n_units * mo.rows], lt, 0),
+            meta_size,
+            (n_units, *lt.unit_grid[1:]),
+            subs,
+            lt.blocks_per_unit,
+            lo,
+            hi,
+            1,  # objects are planned in parallel, one thread each
+            True,
+        )
+        plan_sec = time.perf_counter() - t1
+        chunk_ids += np.uint32(u0 // subs[0] * chunks_per_step)
+        if len(block_ids):
+            first_read = min(first_read, time.perf_counter())
+        parts, n_reqs, nbytes, dec = await _read_listed(
+            store,
+            keys,
+            lt,
+            chunk_ids,
+            block_ids,
+            states,
+            eps,
+            lo,
+            hi,
+            opts,
+            budget,
+            sem,
+        )
+        listed = np.column_stack((chunk_ids, block_ids)) if return_blocks else None
+        return parts, n_in, n_out, len(block_ids), n_reqs, nbytes, plan_sec, dec, listed
+
+    outs = await asyncio.gather(*(one(i) for i in range(mo.count)))
+    end = time.perf_counter()
+    n_in, n_out, n_listed, n_reqs, payload_bytes = (
+        sum(o[k] for o in outs) for k in range(1, 6)
+    )
+    useful_bytes = n_listed * lt.layer_bytes[0]
+    return AggregateResult(
+        **combine([p for o in outs for p in o[0]], lt.values_per_block),
+        in_blocks=n_in,
+        out_blocks=n_out,
+        maybe_blocks=n_listed - n_in,
+        total_blocks=len(keys) * lt.blocks_per_chunk,
+        metadata_bytes_read=mo.count * mo.size,
+        payload_bytes_read=payload_bytes,
+        metadata_requests=mo.count,
+        payload_requests=n_reqs,
+        useful_payload_bytes=useful_bytes,
+        payload_overread_bytes=payload_bytes - useful_bytes,
+        metadata_read_seconds=last_meta - t0,
+        planning_seconds=sum(o[6] for o in outs),
+        payload_read_seconds=end - first_read if n_reqs else 0.0,
+        decode_seconds=sum(o[7] for o in outs),
+        total_seconds=end - t0,
+        peak_inflight_bytes=budget.peak,
+        read_blocks=np.concatenate([o[8] for o in outs]) if return_blocks else None,
     )
 
 

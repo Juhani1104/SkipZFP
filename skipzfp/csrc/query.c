@@ -196,9 +196,29 @@ static void classify_unit(
     }
 }
 
+/* error bound of block bid of the unit record cm as a float32 rounded up, so it
+ * never falls below the bound the planner used for that block */
+static float
+listed_error(const unsigned char* cm, size_t n_block, int has_codes, size_t bid) {
+    const unsigned char* codes =
+        has_codes ? cm + 3u * sizeof(float) + 2u * n_block : NULL;
+    float eps;
+    double e;
+    float out;
+
+    memcpy(&eps, cm + 2u * sizeof(float), sizeof(float));
+    e = block_error(eps, codes, bid);
+    out = (float)e;
+    if ((double)out < e) {
+        out = nextafterf(out, INFINITY);
+    }
+    return out;
+}
+
 /* classify every block for lo < x <= hi and list the blocks a query reads,
  * sorted by (chunk, block): the MAYBE blocks, plus the IN blocks when keep_in
- * is set. When states is not NULL, it receives each listed block's state. */
+ * is set. When states_out is not NULL, it receives each listed block's state,
+ * and when eps_out is not NULL, each listed block's error bound. */
 static int plan_blocks(
     const unsigned char* meta,
     size_t meta_size,
@@ -216,6 +236,7 @@ static int plan_blocks(
     uint32_t* maybe_chunks,
     uint32_t* maybe_blocks,
     unsigned char* states_out,
+    float* eps_out,
     size_t maybe_cap,
     size_t* out_maybe,
     size_t* out_in,
@@ -325,6 +346,9 @@ static int plan_blocks(
     for (size_t cid = 0; cid < n_chunk; cid++) {
         const unsigned char* st = states + cid * blocks_per_chunk;
         size_t k = n_maybe_chunk[cid];
+        size_t cx = cid / (gy * gz);
+        size_t cy = (cid / gz) % gy;
+        size_t cz = cid % gz;
 
         for (size_t b = 0; b < blocks_per_chunk; b++) {
             if (st[b] == 2 || (keep_in && st[b] == 1)) {
@@ -332,6 +356,20 @@ static int plan_blocks(
                 maybe_blocks[k] = (uint32_t)b;
                 if (states_out != NULL) {
                     states_out[k] = st[b];
+                }
+                if (eps_out != NULL) {
+                    size_t sub = b / blocks_per_unit;
+                    size_t ix = cx * sx + sub / (sy * sz);
+                    size_t iy = cy * sy + (sub / sz) % sy;
+                    size_t iz = cz * sz + sub % sz;
+                    size_t uid = (ix * uy + iy) * uz + iz;
+
+                    eps_out[k] = listed_error(
+                        meta + uid * meta_size,
+                        blocks_per_unit,
+                        has_codes,
+                        b % blocks_per_unit
+                    );
                 }
                 k++;
             }
@@ -384,6 +422,7 @@ int szfp_plan_range_chunks(
         maybe_chunks,
         maybe_blocks,
         NULL,
+        NULL,
         maybe_cap,
         out_maybe,
         out_in,
@@ -407,6 +446,7 @@ int szfp_plan_read_chunks(
     uint32_t* read_chunks,
     uint32_t* read_blocks,
     unsigned char* read_states,
+    float* read_eps,
     size_t read_cap,
     size_t* out_read,
     size_t* out_in,
@@ -433,6 +473,7 @@ int szfp_plan_read_chunks(
         read_chunks,
         read_blocks,
         read_states,
+        read_eps,
         read_cap,
         out_read,
         out_in,

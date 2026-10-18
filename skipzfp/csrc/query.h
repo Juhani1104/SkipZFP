@@ -261,8 +261,10 @@ int szfp_count_offsets_range(
  * @param[out] read_chunks Chunk id of each listed block.
  * @param[out] read_blocks Position of each listed block in its chunk.
  * @param[out] read_states State of each listed block, 1 for IN or 2 for MAYBE.
- * @param[in]  read_cap    Length of the three output arrays, which must be
- *                         at least the total number of blocks.
+ * @param[out] read_eps    Error bound of each listed block, the unit's or its
+ *                         4-bit one, rounded up to float32; may be NULL.
+ * @param[in]  read_cap    Length of the output arrays, which must be at least
+ *                         the total number of blocks.
  * @param[out] out_read    Number of blocks listed.
  * @param[out] out_in      Number of IN blocks.
  * @param[out] out_out     Number of OUT blocks.
@@ -286,6 +288,7 @@ int szfp_plan_read_chunks(
     uint32_t* read_chunks,
     uint32_t* read_blocks,
     unsigned char* read_states,
+    float* read_eps,
     size_t read_cap,
     size_t* out_read,
     size_t* out_in,

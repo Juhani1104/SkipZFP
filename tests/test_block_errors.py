@@ -8,9 +8,8 @@ import zarr
 from zarr.core.sync import sync
 
 from skipzfp import QueryOptions, aggregate_gt, codec, query
-from skipzfp.aggregate import block_eps
 
-from helpers import SHAPE, make_array, smooth_field, true_blocks
+from helpers import SHAPE, block_eps, make_array, smooth_field, true_blocks
 
 
 def test_config_round_trip_and_checks():
@@ -196,7 +195,7 @@ def test_sub_chunks_with_codes(tmp_path, order):
     rec = z[:]
     lt = query.get_layout(z)
     meta, _, _ = sync(query.read_meta(z, lt))
-    chunks, blocks, _, _, _ = query.native().plan_read(
+    chunks, blocks, _, _, _, got = query.native().plan_read(
         meta,
         lt.meta_size,
         lt.unit_grid,
@@ -205,16 +204,20 @@ def test_sub_chunks_with_codes(tmp_path, order):
         -np.inf,
         np.inf,
         1,
+        eps=True,
     )
-    got = block_eps(
-        meta,
-        lt.meta_size,
-        lt.unit_grid,
-        lt.unit_grid_per_chunk,
-        lt.grid_shape,
-        lt.blocks_per_unit,
-        chunks,
-        blocks,
+    assert np.array_equal(
+        got,
+        block_eps(
+            meta,
+            lt.meta_size,
+            lt.unit_grid,
+            lt.unit_grid_per_chunk,
+            lt.grid_shape,
+            lt.blocks_per_unit,
+            chunks,
+            blocks,
+        ),
     )
     # the error of the block at each storage position, from the C-order blocks
     rank_of = codec.block_rank(SHAPE, order)

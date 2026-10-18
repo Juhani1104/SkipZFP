@@ -13,12 +13,12 @@ from skipzfp import (
     codec,
     query,
 )
-from skipzfp.aggregate import block_eps
 
 from helpers import (
     LAYERS,
     RATES,
     SHAPE,
+    block_eps,
     decode_one_block,
     make_array,
     smooth_field,
@@ -297,7 +297,7 @@ def test_each_block_gets_its_own_sub_chunks_error_bound(tmp_path, order):
     lt = query.get_layout(z)
     assert lt.unit_grid_per_chunk == (2, 2, 4) and lt.grid_shape == (2, 1, 1)
     meta, _, _ = sync(query.read_meta(z, lt))
-    chunk_ids, block_ids, _, n_in, _ = query.native().plan_read(
+    chunk_ids, block_ids, _, n_in, _, got = query.native().plan_read(
         meta,
         lt.meta_size,
         lt.unit_grid,
@@ -306,17 +306,21 @@ def test_each_block_gets_its_own_sub_chunks_error_bound(tmp_path, order):
         -np.inf,
         np.inf,
         1,
+        eps=True,
     )
     assert n_in == len(block_ids) == 2 * lt.blocks_per_chunk
-    got = block_eps(
-        meta,
-        lt.meta_size,
-        lt.unit_grid,
-        lt.unit_grid_per_chunk,
-        lt.grid_shape,
-        lt.blocks_per_unit,
-        chunk_ids,
-        block_ids,
+    assert np.array_equal(
+        got,
+        block_eps(
+            meta,
+            lt.meta_size,
+            lt.unit_grid,
+            lt.unit_grid_per_chunk,
+            lt.grid_shape,
+            lt.blocks_per_unit,
+            chunk_ids,
+            block_ids,
+        ),
     )
     payloads = [
         np.fromfile(tmp_path / "data" / "c" / str(c) / "0" / "0", np.uint8)
