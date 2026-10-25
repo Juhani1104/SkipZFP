@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import zarr
 
-from skipzfp import codec, query
+from skipzfp import aggregate, codec, query
 
 from helpers import RATES, SHAPE, smooth_field, split, true_blocks
 
@@ -222,3 +222,71 @@ def test_pipelined_query_matches_whole_zone_map(
         )
         assert g_.payload_bytes_read == w.payload_bytes_read
         assert g_.payload_requests == w.payload_requests
+
+
+def test_pack_meta_round_trips_any_bytes():
+    rng = np.random.default_rng(0)
+    rec = rng.integers(0, 256, (37, 8 + 4 * 2 + 2 * 64 + 32), dtype=np.uint8)
+    packed = codec.pack_meta(rec, 16, 64)
+    assert packed.shape == (rec.size,)
+    assert np.array_equal(codec.unpack_meta(packed, rec.shape[1], 16, 64), rec)
+
+
+# t_chunk=3 leaves a padded last object, and 4-bit codes and layers lengthen records
+@pytest.mark.parametrize("t_chunk", (None, 3, 1))
+@pytest.mark.parametrize(
+    "kw", [dict(), dict(block_error_bits=4), dict(layers=(2.0, 4.0, 8.0))]
+)
+def test_compressed_zone_map_reads_like_raw(tmp_path, t_chunk, kw):
+    """A compressed zone map reads back, by key and as a Zarr array, as the raw
+    one does, and queries on it give the same answers from fewer bytes."""
+    a = smooth_field(shape=(128, 32, 64), seed=5)
+    g = zarr.open_group(str(tmp_path / "c"), mode="w")
+    z = g.create_array(
+        "data",
+        shape=a.shape,
+        chunks=SHAPE,
+        dtype="float32",
+        serializer=codec.SkipZFPCodec(rate=8.0, sub_chunk=(32, 16, 32), **kw),
+        compressors=None,
+        filters=None,
+    )
+    z[:] = a
+    lt = query.get_layout(z)
+    lo, hi = (float(x) for x in np.quantile(a, [0.3, 0.7]))
+    opts = [query.QueryOptions(layer=0), query.QueryOptions(layer=0, pipeline=False)]
+
+    def answers():
+        return [
+            (r.count, r.in_blocks, r.out_blocks, r.maybe_blocks, r.metadata_bytes_read)
+            for o in opts
+            for r in (
+                query.query_gt(z, lo, options=o),
+                query.query_range(z, lo, hi, options=o),
+                aggregate.aggregate_gt(z, lo, options=o),
+            )
+        ]
+
+    codec.write_meta(z, a, t_chunk=t_chunk)
+    raw, raw_bytes, _ = asyncio.run(query.read_meta(z, lt))
+    want = answers()
+    codec.write_meta(z, a, t_chunk=t_chunk, compress=True)
+    assert z.attrs[codec.META_PACKING_ATTR] == codec.PLANAR_ZSTD
+    (data, nbytes, _), (opened, _, _) = read_both(z)
+    assert np.array_equal(data, raw) and np.array_equal(opened, raw)
+    assert nbytes < raw_bytes
+    got = answers()
+    assert [g_[:4] for g_ in got] == [w[:4] for w in want]
+    assert all(g_[4] < w[4] for g_, w in zip(got, want))
+
+    codec.write_meta(z, a, t_chunk=t_chunk)
+    assert z.attrs[codec.META_PACKING_ATTR] is None
+    assert answers() == want
+
+
+def test_read_meta_rejects_unknown_packing(array_and_data):
+    z, a = array_and_data
+    codec.write_meta(z, a)
+    z.attrs[codec.META_PACKING_ATTR] = "lz4"
+    with pytest.raises(ValueError, match="unknown zone map packing"):
+        asyncio.run(query.read_meta(z, query.get_layout(z)))

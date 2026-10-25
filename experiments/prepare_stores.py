@@ -85,7 +85,7 @@ def write_skipzfp(path, a, layout):
         filters=None,
     )
     write_slabs(z, a)
-    codec.write_meta(z, a, t_chunk=1 if layout == "k64t" else 16)
+    codec.write_meta(z, a, t_chunk=1 if layout == "k64t" else None)
     return z
 
 

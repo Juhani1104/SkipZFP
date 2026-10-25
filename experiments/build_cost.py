@@ -83,7 +83,7 @@ def one(raw, var, layout, tmp, nt=None):
         t_data = time.perf_counter() - t0
     with Sampler() as s_meta:
         t0 = time.perf_counter()
-        codec.write_meta(z, a, t_chunk=16)
+        codec.write_meta(z, a)
         t_meta = time.perf_counter() - t0
     out = dict(
         shape=list(a.shape),
