@@ -30,6 +30,15 @@ VARS = ("t2m", "ws")
 # a multiple of every chunk and shard length along time. 4096 steps of 128 x 256
 # float32 is 537 MB, enough chunks to keep every core busy within one slab.
 SLAB = 64 * 64
+# and at most this many bytes, so a slab of a wider grid, such as the global ERA5's
+# 640 x 1280 (13 GB for 4096 steps), still fits in memory with its copies
+SLAB_BYTES = 1 << 30
+
+
+def slab_step(shape, itemsize=4, step=SLAB):
+    """step, cut to a multiple of 64 steps of at most SLAB_BYTES for this grid."""
+    per_step = int(np.prod(shape[1:])) * itemsize
+    return min(step, max(64, SLAB_BYTES // per_step // 64 * 64))
 
 
 def shape_of(tag):
@@ -81,6 +90,25 @@ def slabs(n, step=SLAB):
         yield s, min(s + step, n)
 
 
+def _copy(a, s, e, parts=16):
+    """np.array(a[s:e]); a memory map is copied in parts on several threads at once.
+
+    Copying a memory map faults its pages in one read at a time, which a network disk
+    serves at a few tens of MB/s; reads issued together run many times faster.
+    """
+    if not isinstance(a, np.memmap) or e - s < parts:
+        return np.array(a[s:e])
+    out = np.empty((e - s, *a.shape[1:]), a.dtype)
+    cuts = np.linspace(s, e, parts + 1).astype(int)
+
+    def one(i):
+        out[cuts[i] - s : cuts[i + 1] - s] = a[cuts[i] : cuts[i + 1]]
+
+    with ThreadPoolExecutor(parts) as ex:
+        list(ex.map(one, range(parts)))
+    return out
+
+
 def read_slabs(a, step=SLAB, read=None):
     """Yield (start, stop, values) for each time slab of a, in memory.
 
@@ -89,7 +117,9 @@ def read_slabs(a, step=SLAB, read=None):
     a[start:stop], which is what pulls a memory map from disk; with a custom read, a
     can be just the number of steps.
     """
-    read = read or (lambda s, e: np.array(a[s:e]))
+    read = read or (lambda s, e: _copy(a, s, e))
+    if hasattr(a, "shape"):
+        step = slab_step(a.shape, a.dtype.itemsize, step)
     spans = list(slabs(a.shape[0] if hasattr(a, "shape") else a, step))
     with ThreadPoolExecutor(1) as ex:
         nxt = ex.submit(read, *spans[0]) if spans else None
@@ -125,7 +155,8 @@ def load_era5(path, var, nt=None, cache=None):
         part = out.with_suffix(".part.npy")
         shape = (n, *g["t2m"].shape[1:])
         mm = np.lib.format.open_memmap(part, mode="w+", dtype=np.float32, shape=shape)
-        for s, e, x in read_slabs(n, read=lambda s, e: _era5_slab(g, var, s, e)):
+        step = slab_step(shape)
+        for s, e, x in read_slabs(n, step, read=lambda s, e: _era5_slab(g, var, s, e)):
             mm[s:e] = x
         mm.flush()
         del mm

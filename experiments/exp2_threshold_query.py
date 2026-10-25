@@ -176,10 +176,20 @@ def thresholds(raw, nt=None, step=64 * 16, cache=None, selectivities=SELECTIVITI
     """Thresholds for each selectivity and the exact count above each.
 
     With cache, each variable is read through a memory map on disk, so it never has
-    to fit in memory.
+    to fit in memory, and the result is kept there as thresholds_<var>.json for a
+    rerun on the same data.
     """
     ths, truth = {}, {}
     for var in VARS:
+        # a rerun on the same data reuses what an earlier run found
+        saved = Path(cache, f"thresholds_{var}.json") if cache else None
+        key = dict(raw=str(raw), var=var, nt=nt, selectivities=list(selectivities))
+        if saved and saved.exists():
+            got = json.loads(saved.read_text())
+            if got["key"] == key:
+                ths[var], truth[var] = got["thresholds"], got["truth"]
+                print(var, "thresholds (saved)", ths[var], flush=True)
+                continue
         a = load_era5(raw, var, nt, cache=cache)
         ths[var] = [float(x) for x in quantiles(a, [1 - s for s in selectivities])]
         truth[var] = [0] * len(selectivities)
@@ -190,6 +200,9 @@ def thresholds(raw, nt=None, step=64 * 16, cache=None, selectivities=SELECTIVITI
         del a
         if cache:
             Path(cache, f"{var}.npy").unlink()
+            saved.write_text(
+                json.dumps(dict(key=key, thresholds=ths[var], truth=truth[var]))
+            )
         print(var, "thresholds", ths[var], flush=True)
     return ths, truth
 
