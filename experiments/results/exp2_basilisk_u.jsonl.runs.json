@@ -1,0 +1,90 @@
+{
+ "20261023T095943-a6e4d8": {
+  "started": "2026-10-23T09:59:43Z",
+  "source": {
+   "commit": "3a4dc2793c2416e5cc19a5c059ef976aa3ebb166",
+   "dirty": true,
+   "diff_sha256": "c4bec836ef0d2ed44b9011746593cfd5b4a01341900446047af394a787c1d2c9"
+  },
+  "machine": {
+   "host": "skipzfp-vm2",
+   "gce_machine_type": "n2-standard-16",
+   "gce_zone": "us-central1-a",
+   "cpu": "Intel(R) Xeon(R) CPU @ 2.80GHz",
+   "cpus": 16,
+   "mem_kb": 65854796,
+   "kernel": "6.1.0-54-cloud-amd64"
+  },
+  "calibration": {
+   "encode_chunk_s": 0.07342885000002752,
+   "decode_chunk_s": 0.037852739999948426,
+   "sum_512mb_s": 0.04475957900001504
+  },
+  "packages": {
+   "python": "3.11.2",
+   "numpy": "2.4.6",
+   "zarr": "3.1.6",
+   "obstore": "0.11.1",
+   "zfpy": "1.0.1",
+   "numcodecs": "0.16.5",
+   "skipzfp": "0.1.0",
+   "libzfp": "zfp version 1.0.1 (December 15, 2023)"
+  },
+  "data": {
+   "path": "/home/lucas710542/bas_data/basilisk_u.zarr",
+   "attrs": {
+    "source": "https://g-d0cd3f.fd635.8443.data.globus.org/raw-data/Basilisk-Turbulence/SDRBENCH-Basilisk-Turbulence.tar.gz",
+    "member": "SDRBENCH-Basilisk-Turbulence/u_1024x1024x1501Re10k.f32",
+    "steps": 1472,
+    "time_unit": "simulation frames, frame 0 skipped"
+   },
+   "arrays": {
+    "time": {
+     "shape": [
+      1472
+     ],
+     "dtype": "float64"
+    },
+    "u": {
+     "shape": [
+      1472,
+      1024,
+      1024
+     ],
+     "dtype": "float32"
+    }
+   },
+   "time_range": [
+    1.0,
+    1472.0
+   ],
+   "fingerprint_sha256": "ac3608456f030828e5a9d7b1fe4f591c29d639ac9551f40e963135b57124443b"
+  },
+  "fields": {
+   "seconds": "wall time of the query, from the first metadata read to the answer",
+   "open_seconds": "wall time to open the array (zarr.json), before the query",
+   "open_requests": "requests made while opening the array",
+   "metadata_seconds": "wall time until the zone map or indexes were read",
+   "planning_seconds": "planning time; with the pipeline, summed over objects",
+   "payload_seconds": "wall time from the first payload read to the last decode",
+   "decode_seconds": "decode time summed over every read, across threads, so it can exceed the wall time and must not be stacked with the others",
+   "requests": "requests made by the query, counted by a wrapper store",
+   "bytes": "bytes returned to the query, counted by a wrapper store",
+   "peak_rss_kb": "peak resident memory of the measuring process (VmHWM), page cache not included",
+   "cgroup_peak_bytes": "memory.peak of the job's cgroup, page cache included",
+   "peak_inflight_bytes": "most payload bytes reserved at once, from a read's start until its blocks are decoded: an upper bound on payload buffers, not memory used, since reads still downloading count too; see peak_rss_kb for memory"
+  },
+  "script": "exp2",
+  "reps": 30,
+  "layouts": [
+   "k8t",
+   "k8",
+   "k8t-z",
+   "k8-z"
+  ],
+  "nt": null,
+  "vars": [
+   "u"
+  ]
+ }
+}

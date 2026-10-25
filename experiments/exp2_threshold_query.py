@@ -1,7 +1,8 @@
 """Experiment 2: threshold query count(x > T) on ten years of ERA5 (t2m, wind speed).
 
 usage: python exp2_threshold_query.py run <raw.zarr> <root> <out.jsonl> [--reps 5]
-                                          [--layouts k8t,k8] [--nt N]
+                                          [--layouts k8t,k8] [--nt N] [--vars t2m,ws]
+                                          [--tight] [--chunk-root ROOT]
        python exp2_threshold_query.py one <url> <method> <threshold> [<options>]
 
 <options> is a JSON object for SkipZFP: "op" ("count" or "avg") plus any
@@ -9,7 +10,13 @@ QueryOptions field, such as {"pipeline": false}; for zshard_izm, "gap_bytes", th
 merge gap of its reads (default 850 KB). Each row records its run_id;
 <out.jsonl>.runs.json holds the code, machine, packages and data of each run.
 
-<root> holds the stores built by `prepare_stores.py --suite threshold`. Every
+<root> holds the stores built by `prepare_stores.py --suite threshold`; --vars runs
+other variables, such as the CMIP6 precipitation pr of fetch_cmip6.py. --tight also
+measures ZFP fixed-accuracy at the tolerance of `prepare_stores.py --suite tight`,
+whose counts are as accurate as SkipZFP's, as size <chunk>-tight. --chunk-root
+reads the chunked baselines (zstd and ZFP with chunk zone maps, and their full
+scans) from another root, such as the threshold suite next to an objects suite.
+Every
 measurement runs in a fresh process; jobs are shuffled so methods interleave, and a
 rerun skips jobs already in <out.jsonl>.
 """
@@ -51,6 +58,14 @@ BASELINES = [
     ("zfpacc_zm", "64x128x256"),
     ("zshard_izm", "64x16x32"),
     ("zshard_izm", "16x16x16"),
+]
+# the baselines whose storage object is their chunk, so the object size of SkipZFP
+# and Zarr sharding leaves them as they are
+CHUNKED = {"zstd_zm", "zfpacc_zm", "fullscan_zstd", "fullscan_zfpacc"}
+# ZFP fixed-accuracy at the tolerance whose counts are as accurate as SkipZFP's
+TIGHT_BASELINES = [
+    ("zfpacc_zm", "64x64x128-tight"),
+    ("zfpacc_zm", "64x128x256-tight"),
 ]
 FULL_SCANS = [
     ("fullscan_zstd", "64x128x256"),
@@ -172,7 +187,9 @@ def one(url, method, th, opts=None):
     print(json.dumps(out))
 
 
-def thresholds(raw, nt=None, step=64 * 16, cache=None, selectivities=SELECTIVITIES):
+def thresholds(
+    raw, nt=None, step=64 * 16, cache=None, selectivities=SELECTIVITIES, variables=VARS
+):
     """Thresholds for each selectivity and the exact count above each.
 
     With cache, each variable is read through a memory map on disk, so it never has
@@ -180,7 +197,7 @@ def thresholds(raw, nt=None, step=64 * 16, cache=None, selectivities=SELECTIVITI
     rerun on the same data.
     """
     ths, truth = {}, {}
-    for var in VARS:
+    for var in variables:
         # a rerun on the same data reuses what an earlier run found
         saved = Path(cache, f"thresholds_{var}.json") if cache else None
         key = dict(raw=str(raw), var=var, nt=nt, selectivities=list(selectivities))
@@ -207,18 +224,20 @@ def thresholds(raw, nt=None, step=64 * 16, cache=None, selectivities=SELECTIVITI
     return ths, truth
 
 
-def jobs_for(layouts, reps):
+def jobs_for(layouts, reps, variables=VARS, tight=False):
     methods = [("skipzfp", lay) for lay in layouts] + BASELINES
+    if tight:
+        methods += TIGHT_BASELINES
     jobs = [
         dict(var=v, method=m, size=sz, sel=s, rep=r)
-        for v in VARS
+        for v in variables
         for m, sz in methods
         for s in SELECTIVITIES
         for r in range(reps)
     ]
     jobs += [
         dict(var=v, method=m, size=sz, sel=FULL_SCAN_SELECTIVITY, rep=r)
-        for v in VARS
+        for v in variables
         for m, sz in FULL_SCANS
         for r in range(reps)
     ]
@@ -226,10 +245,31 @@ def jobs_for(layouts, reps):
     return jobs
 
 
-def run(raw, root, out_path, reps, layouts, nt=None, cache=None):
-    run_id = start_run(out_path, raw, script="exp2", reps=reps, layouts=layouts, nt=nt)
-    ths, truth = thresholds(raw, nt, cache=cache)
-    jobs = jobs_for(layouts, reps)
+def run(
+    raw,
+    root,
+    out_path,
+    reps,
+    layouts,
+    nt=None,
+    cache=None,
+    variables=VARS,
+    tight=False,
+    chunk_root=None,
+):
+    run_id = start_run(
+        out_path,
+        raw,
+        script="exp2",
+        reps=reps,
+        layouts=layouts,
+        nt=nt,
+        vars=variables,
+        tight=tight,
+        chunk_root=chunk_root,
+    )
+    ths, truth = thresholds(raw, nt, cache=cache, variables=variables)
+    jobs = jobs_for(layouts, reps, variables, tight)
 
     def key(j):
         return (j["var"], j["method"], j["size"], j["sel"], j["rep"])
@@ -244,7 +284,10 @@ def run(raw, root, out_path, reps, layouts, nt=None, cache=None):
     for i, j in enumerate(todo, 1):
         idx = SELECTIVITIES.index(j["sel"])
         th = ths[j["var"]][idx]
-        url = store_url(root, j["var"], j["method"], j["size"])
+        chunked = j["method"] in CHUNKED and chunk_root
+        url = store_url(
+            chunk_root if chunked else root, j["var"], j["method"], j["size"]
+        )
         cmd = [sys.executable, str(Path(__file__)), "one", url, j["method"], repr(th)]
         p = subprocess.run(cmd, capture_output=True, text=True)
         if p.returncode != 0:
@@ -273,6 +316,9 @@ if __name__ == "__main__":
     ap.add_argument("--layouts", default="k8t,k8")
     ap.add_argument("--nt", type=int)
     ap.add_argument("--cache", help="directory for on-disk copies of the raw data")
+    ap.add_argument("--vars", default=",".join(VARS))
+    ap.add_argument("--tight", action="store_true")
+    ap.add_argument("--chunk-root", help="where the chunked baselines are")
     args = ap.parse_args()
     if args.cache:
         Path(args.cache).mkdir(parents=True, exist_ok=True)
@@ -284,4 +330,7 @@ if __name__ == "__main__":
         args.layouts.split(","),
         args.nt,
         args.cache,
+        args.vars.split(","),
+        args.tight,
+        args.chunk_root,
     )

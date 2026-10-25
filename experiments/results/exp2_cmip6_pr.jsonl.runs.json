@@ -1,0 +1,97 @@
+{
+ "20261024T131328-581639": {
+  "started": "2026-10-24T13:13:28Z",
+  "source": {
+   "commit": "3a4dc2793c2416e5cc19a5c059ef976aa3ebb166",
+   "dirty": true,
+   "diff_sha256": "e361c68edfb99028aa3b3f0345b263ac0d6e0395ee058532c63692a25f0d0330"
+  },
+  "machine": {
+   "host": "skipzfp-vm2",
+   "gce_machine_type": "n2-standard-16",
+   "gce_zone": "us-central1-a",
+   "cpu": "Intel(R) Xeon(R) CPU @ 2.80GHz",
+   "cpus": 16,
+   "mem_kb": 65854796,
+   "kernel": "6.1.0-54-cloud-amd64"
+  },
+  "calibration": {
+   "encode_chunk_s": 0.0732647239999551,
+   "decode_chunk_s": 0.03776194900001428,
+   "sum_512mb_s": 0.04393812099988281
+  },
+  "packages": {
+   "python": "3.11.2",
+   "numpy": "2.4.6",
+   "zarr": "3.1.6",
+   "obstore": "0.11.1",
+   "zfpy": "1.0.1",
+   "numcodecs": "0.16.5",
+   "skipzfp": "0.1.0",
+   "libzfp": "zfp version 1.0.1 (December 15, 2023)"
+  },
+  "data": {
+   "path": "/home/lucas710542/pr_data/cmip6_pr_2000_2009.zarr",
+   "attrs": {
+    "source": "gs://cmip6/CMIP6/HighResMIP/MOHC/HadGEM3-GC31-HM/highresSST-present/r1i1p1f1/3hr/pr/gn/v20170831/",
+    "steps": 28800,
+    "time_unit": "hours since 2000-01-01 01:30:00.000000",
+    "calendar": "360_day",
+    "lat": [
+     0.1171875,
+     59.8828125
+    ],
+    "lon": [
+     0.17578125,
+     179.82421875
+    ]
+   },
+   "arrays": {
+    "pr": {
+     "shape": [
+      28800,
+      256,
+      512
+     ],
+     "dtype": "float32"
+    },
+    "time": {
+     "shape": [
+      28800
+     ],
+     "dtype": "float64"
+    }
+   },
+   "time_range": [
+    0.0,
+    86397.0
+   ],
+   "fingerprint_sha256": "aba377b25f4c587275cd6c1216848362c14affbbac584dcc9623d1827b24550a"
+  },
+  "fields": {
+   "seconds": "wall time of the query, from the first metadata read to the answer",
+   "open_seconds": "wall time to open the array (zarr.json), before the query",
+   "open_requests": "requests made while opening the array",
+   "metadata_seconds": "wall time until the zone map or indexes were read",
+   "planning_seconds": "planning time; with the pipeline, summed over objects",
+   "payload_seconds": "wall time from the first payload read to the last decode",
+   "decode_seconds": "decode time summed over every read, across threads, so it can exceed the wall time and must not be stacked with the others",
+   "requests": "requests made by the query, counted by a wrapper store",
+   "bytes": "bytes returned to the query, counted by a wrapper store",
+   "peak_rss_kb": "peak resident memory of the measuring process (VmHWM), page cache not included",
+   "cgroup_peak_bytes": "memory.peak of the job's cgroup, page cache included",
+   "peak_inflight_bytes": "most payload bytes reserved at once, from a read's start until its blocks are decoded: an upper bound on payload buffers, not memory used, since reads still downloading count too; see peak_rss_kb for memory"
+  },
+  "script": "exp2",
+  "reps": 30,
+  "layouts": [
+   "k8t",
+   "k8"
+  ],
+  "nt": null,
+  "vars": [
+   "pr"
+  ],
+  "tight": true
+ }
+}

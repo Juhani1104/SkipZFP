@@ -10,7 +10,10 @@ Reads whichever result files are in <results dir> and writes Markdown tables:
   p95), bytes, requests and fraction of blocks read; each SkipZFP layout's speedup
   over the fastest baseline, with a 95% bootstrap interval that picks the fastest
   baseline again in every resample, and over every baseline; the median time of
-  each step of a query, critical-path and summed kept apart; and cold open.
+  each step of a query, critical-path and summed kept apart; and cold open. The
+  same tables come from exp2_cmip6_pr.jsonl, exp2_basilisk_u.jsonl and
+  exp2_global.jsonl, exp2 on the CMIP6 precipitation, the Basilisk turbulence and
+  one year of ERA5 over most of the globe.
 - ablation: per variable, config and selectivity, the wall time, bytes and
   requests, and the ratio of each config's median time to its reference's, with a
   95% bootstrap interval (resampling both groups, seed 0, 2000 resamples); p50,
@@ -127,9 +130,16 @@ def is_baseline(method):
     return method.endswith(("_zm", "_izm"))
 
 
-def exp2(rows):
+def count_error(r):
+    """|count - truth| / truth, the relative error of a count over the original values."""
+    return abs(r["count"] - r["truth"]) / r["truth"] if r["truth"] else 0.0
+
+
+def exp2(rows, name="exp2"):
     """Every method's times, then SkipZFP against the fastest and each baseline."""
     rng = random.Random(SEED)
+    # its own generator, so adding this table leaves the others' intervals as they were
+    fair_rng = random.Random(SEED + 1)
     g = defaultdict(list)
     for r in rows:
         g[(r["var"], r["sel"], r["method"], r["size"])].append(r)
@@ -142,13 +152,15 @@ def exp2(rows):
                 f"{median([r['bytes'] for r in v]) / 1e6:.1f}",
                 f"{median([r['requests'] for r in v]):.0f}",
                 f"{median([read_fraction(r) for r in v]):.4f}",
+                f"{100 * median([count_error(r) for r in v]):.3f}",
             ]
         )
     head = ["var", "sel", "method", "size", "n", "p25 s", "median s", "p75 s"]
-    head += ["p95 s", "MB", "requests", "MAYBE frac"]
-    out = "## exp2\n\n" + runs_of(rows) + "\n\n" + table(head, lines)
+    head += ["p95 s", "MB", "requests", "MAYBE frac", "count error %"]
+    out = f"## {name}\n\n" + runs_of(rows) + "\n\n" + table(head, lines)
+    err = {k: max(count_error(r) for r in v) for k, v in g.items()}
 
-    best, each = [], []
+    best, accurate, each = [], [], []
     for (var, sel, method, size), ours in sorted(secs.items()):
         if method != "skipzfp":
             continue
@@ -159,12 +171,27 @@ def exp2(rows):
         }
         if not base:
             continue
-        point, lo, hi = best_ratio_ci(list(base.values()), ours, rng)
+        point, lo, hi = all_ci = best_ratio_ci(list(base.values()), ours, rng)
         fastest = min(base, key=lambda k: median(base[k]))
         best.append(
             [var, sel, size, f"{point:.2f}x", f"[{lo:.2f}, {hi:.2f}]"]
             + [" ".join(fastest), f"{p_faster(ours, base[fastest]):.2f}"]
         )
+        ours_err = err[(var, sel, method, size)]
+        fair = {k: t for k, t in base.items() if err[(var, sel, *k)] <= ours_err}
+        if fair:
+            # the same baselines give the same interval, not a second resampling
+            point, lo, hi = (
+                all_ci
+                if fair.keys() == base.keys()
+                else best_ratio_ci(list(fair.values()), ours, fair_rng)
+            )
+            fastest = min(fair, key=lambda k: median(fair[k]))
+            accurate.append(
+                [var, sel, size, f"{100 * ours_err:.3f}", f"{point:.2f}x"]
+                + [f"[{lo:.2f}, {hi:.2f}]", " ".join(fastest)]
+                + [f"{p_faster(ours, fair[fastest]):.2f}"]
+            )
         for (m, s), t in sorted(base.items()):
             a, b = ratio_ci(t, ours, rng)
             each.append(
@@ -181,6 +208,17 @@ def exp2(rows):
     out += table(
         ["var", "sel", "layout", "speedup", "95% CI", "fastest baseline", "P(faster)"],
         best,
+    )
+    out += "\n\n### SkipZFP over the fastest baseline as accurate\n\n"
+    out += (
+        "Only baselines whose count error, |count - truth| / truth over the "
+        "original values, is at most SkipZFP's at that selectivity take part, so "
+        "no baseline is faster for answering worse.\n\n"
+    )
+    out += table(
+        ["var", "sel", "layout", "SkipZFP error %", "speedup", "95% CI"]
+        + ["fastest baseline", "P(faster)"],
+        accurate,
     )
     out += "\n\n### SkipZFP over every baseline\n\n"
     out += table(
@@ -240,7 +278,7 @@ def ablation(rows):
     return out
 
 
-def memory(rows):
+def memory(rows, title="memory"):
     g = defaultdict(list)
     for r in rows:
         g[(r["name"], r["limit"])].append(r)
@@ -265,7 +303,7 @@ def memory(rows):
         )
     head = ["method", "limit", "killed", "median s (survivors)", "VmHWM MB"]
     head += ["cgroup peak MB", "page cache MB", "in-flight MB"]
-    out = "## memory\n\n" + runs_of(rows) + "\n\n" + table(head, lines)
+    out = f"## {title}\n\n" + runs_of(rows) + "\n\n" + table(head, lines)
     return out + (
         "\n\nThe median time covers only the jobs that were not killed, which at a"
         " tight limit are biased toward the cheaper selectivity."
@@ -312,7 +350,7 @@ def build(rows, abl):
     return "## build cost\n\n" + runs_of(rows) + "\n\n" + table(head, lines)
 
 
-def stages(rows):
+def stages(rows, name="exp2"):
     """Median time of each step of a query, and cold open, per method."""
     g = defaultdict(list)
     for r in rows:
@@ -330,7 +368,7 @@ def stages(rows):
     ]
     head = ["var", "sel", "method", "size", "n", "wall s", "zone map s", "planning s"]
     head += ["payload s", "decode s (summed)"]
-    out = "## exp2 query steps\n\n" + runs_of(rows) + "\n\n"
+    out = f"## {name} query steps\n\n" + runs_of(rows) + "\n\n"
     out += (
         "Wall, zone map and payload are wall times on the critical path; with the "
         "pipeline they overlap, so they need not add up to the wall time. Planning "
@@ -625,10 +663,17 @@ def main(root, out):
     rows = load(root / "exp1_point_query.jsonl")
     if rows:
         parts.append(point(rows))
-    rows = load(root / "exp2_threshold_query.jsonl")
-    if rows:
-        parts.append(exp2(rows))
-        parts.append(stages(rows))
+    for name, file in (
+        ("exp2", "exp2_threshold_query.jsonl"),
+        ("exp2 CMIP6 pr", "exp2_cmip6_pr.jsonl"),
+        ("exp2 Basilisk u", "exp2_basilisk_u.jsonl"),
+        ("exp2 ERA5 global", "exp2_global.jsonl"),
+        ("exp2 ERA5 global, larger objects", "exp2_global_o.jsonl"),
+    ):
+        rows = load(root / file)
+        if rows:
+            parts.append(exp2(rows, name))
+            parts.append(stages(rows, name))
     abl = load(root / "ablation.jsonl")
     if abl:
         parts.append(ablation(abl))
@@ -638,6 +683,9 @@ def main(root, out):
     rows = load(root / "memory_limit.jsonl")
     if rows:
         parts.append(memory(rows))
+    rows = load(root / "memory_limit_global.jsonl")
+    if rows:
+        parts.append(memory(rows, "memory, ERA5 global"))
     rows = load(root / "build_cost.jsonl")
     if rows:
         parts.append(build(rows, abl))

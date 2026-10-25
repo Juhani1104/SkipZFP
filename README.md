@@ -199,7 +199,9 @@ libzfp, downloads ERA5 from the public
 your bucket, and runs each experiment. Every step can be rerun and resumes where it
 stopped. Next to every results file, `<file>.runs.json` records each run's code version,
 machine, package versions and data, and every row carries its `run_id`;
-`summarize.py` turns the raw results into the tables. The published results used an n2-standard-16 VM in us-central1-b.
+`summarize.py` turns the raw results into the tables. The published results used an n2-standard-16 VM in us-central1-b;
+the Basilisk and CMIP6 runs used one in us-central1-a, from a working tree whose diff
+against the recorded commit is kept as `results/sources/<diff_sha256>.diff`.
 
 <details>
 <summary>Paper figure / table → script → result file</summary>
@@ -208,6 +210,8 @@ machine, package versions and data, and every row carries its `run_id`;
 |---|---|---|
 | Point query | `exp1_point_query.py` | `results/exp1_point_query.jsonl` |
 | Threshold query | `exp2_threshold_query.py` | `results/exp2_threshold_query.jsonl` |
+| Threshold query on Basilisk turbulence | `exp2_threshold_query.py --vars u` | `results/exp2_basilisk_u.jsonl` |
+| Threshold query on CMIP6 precipitation, with a ZFP baseline as accurate as SkipZFP | `exp2_threshold_query.py --vars pr --tight` | `results/exp2_cmip6_pr.jsonl`, `results/tight_pr.json` |
 | Aggregates | `exp3_aggregate.py` | `results/exp3_aggregate.json` |
 | Filtered aggregates | `exp4_filtered_aggregate.py` | `results/exp4_filtered_aggregate.json` |
 | Metadata overhead | `exp5_overhead.py` | `results/exp5_overhead.json` |

@@ -17,7 +17,9 @@ from zarr.storage import WrapperStore
 
 from skipzfp import codec, query  # noqa: F401
 
-SHARD = (64, 128, 256)
+# the storage object: a SkipZFP chunk and a Zarr shard. SKIPZFP_OBJECT, such as
+# 64x320x640, builds and reads a suite with another object size instead
+SHARD = tuple(int(x) for x in os.environ.get("SKIPZFP_OBJECT", "64x128x256").split("x"))
 SUB_CHUNK = (64, 16, 32)
 GAP_BYTES = 850_000
 # SkipZFP threshold queries: 256 KB to 850 KB run equally fast on GCS, and the
@@ -56,9 +58,11 @@ def lossless():
 def skipzfp_codec(layout):
     """k8: sub-chunk 64x16x32 in C order; k8t: time-fastest block order.
 
-    A "-b4" suffix, as in k8t-b4, also stores a 4-bit error bound per block.
+    A "-b4" suffix, as in k8t-b4, also stores a 4-bit error bound per block. A
+    "-z" suffix, as in k8t-z, only compresses the zone map, so the codec is the
+    same as without it.
     """
-    base, _, bits = layout.partition("-b")
+    base, _, bits = layout.removesuffix("-z").partition("-b")
     order = (1, 2, 0) if base.endswith("t") else (0, 1, 2)
     return codec.SkipZFPCodec(
         rate=8.0,
@@ -141,19 +145,21 @@ def _era5_slab(g, var, s, e):
 def load_era5(path, var, nt=None, cache=None):
     """Load one variable, trimmed to whole 64-step objects; ws is derived if needed.
 
-    With cache, the variable is copied slab by slab to <cache>/<var>.npy and returned
-    as a read-only memory map, so it never has to fit in memory. An existing copy is
-    reused.
+    Works on any raw group whose variables are (time, lat, lon) arrays, such as the
+    CMIP6 precipitation of fetch_cmip6.py. With cache, the variable is copied slab by
+    slab to <cache>/<var>.npy and returned as a read-only memory map, so it never has
+    to fit in memory. An existing copy is reused.
     """
     g = zarr.open_group(str(path), mode="r")
-    n = g["t2m"].shape[0]
+    ref = g[var] if var in g else g["u10"]
+    n = ref.shape[0]
     n = (min(n, nt) if nt else n) // 64 * 64
     if cache is None:
         return _era5_slab(g, var, 0, n)
     out = Path(cache, f"{var}.npy")
     if not out.exists():
         part = out.with_suffix(".part.npy")
-        shape = (n, *g["t2m"].shape[1:])
+        shape = (n, *ref.shape[1:])
         mm = np.lib.format.open_memmap(part, mode="w+", dtype=np.float32, shape=shape)
         step = slab_step(shape)
         for s, e, x in read_slabs(n, step, read=lambda s, e: _era5_slab(g, var, s, e)):
@@ -509,8 +515,12 @@ def data_version(raw):
             h.update(np.asarray(a[:]).tobytes())
         else:
             h.update(np.asarray(a[0]).tobytes() + np.asarray(a[-1]).tobytes())
-    t = np.asarray(g["time"][[0, -1]]).astype("datetime64[h]")
-    out["time_range"] = [str(t[0]), str(t[1])]
+    t = np.asarray(g["time"][[0, -1]])
+    if g.attrs.get("time_unit") == "hours since 1970-01-01":  # ERA5
+        t = t.astype("datetime64[h]")
+        out["time_range"] = [str(t[0]), str(t[1])]
+    else:  # a model calendar or simulation steps, kept in their own units
+        out["time_range"] = [float(t[0]), float(t[1])]
     out["fingerprint_sha256"] = h.hexdigest()
     return out
 
