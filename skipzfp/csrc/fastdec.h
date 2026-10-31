@@ -53,6 +53,7 @@ int szfp_fast_count_ok(void);
  * their double bounds down to float first. The caller must check
  * szfp_fast_ok() and szfp_fast_count_ok() first.
  */
-size_t szfp_fast_count(const unsigned char* src, size_t block_nbytes, float lo, float hi);
+size_t
+szfp_fast_count(const unsigned char* src, size_t block_nbytes, float lo, float hi);
 
 #endif

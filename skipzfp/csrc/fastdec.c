@@ -387,7 +387,7 @@ tail_avx512(const uint32_t* u, int emax, float* out) {
     swap_values(&v[0], &v[1], &v[2], &v[3]);     /* v[x], lanes y + 4z */
     inv_lift_avx512(&v[0], &v[1], &v[2], &v[3]); /* along x */
     swap_values(&v[0], &v[1], &v[2], &v[3]);
-    swap_lanes(&v[0], &v[1], &v[2], &v[3]);      /* v[z] again */
+    swap_lanes(&v[0], &v[1], &v[2], &v[3]); /* v[z] again */
 
     s = _mm512_set1_ps(ldexpf(1.0f, emax - 30));
     for (int z = 0; z < 4; z++) {
@@ -503,7 +503,8 @@ void szfp_fast_decode(const unsigned char* src, size_t block_nbytes, float* out)
     tail(u, emax, out);
 }
 
-size_t szfp_fast_count(const unsigned char* src, size_t block_nbytes, float lo, float hi) {
+size_t
+szfp_fast_count(const unsigned char* src, size_t block_nbytes, float lo, float hi) {
 #ifdef SZFP_X86
     unsigned char buf[SZFP_FAST_MAX_BYTES + 8];
     uint64_t bit_planes[32];
