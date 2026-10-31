@@ -25,7 +25,9 @@ GAP_BYTES = 850_000
 # SkipZFP threshold queries: 256 KB to 850 KB run equally fast on GCS, and the
 # smaller gap reads fewer bytes; 128 KB and below get slower (more requests)
 SKIPZFP_GAP_BYTES = 256_000
-CONCURRENCY = 128
+# requests in flight per query, the same for every method; SKIPZFP_CONCURRENCY sets
+# another value, as exp2's --concurrency-sweep does for each query process
+CONCURRENCY = int(os.environ.get("SKIPZFP_CONCURRENCY", "128"))
 EMPTY = np.iinfo(np.uint64).max
 VARS = ("t2m", "ws")
 # time steps handled at once by code that must not hold a whole variable in memory;

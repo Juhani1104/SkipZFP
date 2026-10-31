@@ -669,6 +669,8 @@ def main(root, out):
         ("exp2 Basilisk u", "exp2_basilisk_u.jsonl"),
         ("exp2 ERA5 global", "exp2_global.jsonl"),
         ("exp2 ERA5 global, larger objects", "exp2_global_o.jsonl"),
+        ("exp2 ERA5 global, larger objects, merge gaps", "exp2_global_gap.jsonl"),
+        ("exp2 ERA5 Europe, merge gaps", "exp2_eu_gap.jsonl"),
     ):
         rows = load(root / file)
         if rows:

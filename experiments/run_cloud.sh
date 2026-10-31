@@ -18,6 +18,10 @@
 # (2) set the repetitions, and LIMITS (1G,2G,4G,none) the memory limits. NT, if set,
 # cuts the ten-year data to its first NT steps, for a quick trial run on a small store
 # (BUCKET may then be a local folder).
+# GAPS=1 adds --gap-sweep to exp2, exp2_pr and exp2_bas (Zarr sharding at more merge
+# gaps, SkipZFP at 1 MB). THRESHOLDS=<dir> takes the thresholds and exact counts of
+# exp2, exp2_pr, exp2_bas, ablation and memory from the exp2 results in <dir>, so
+# those steps do not need the raw data.
 # Needs Python 3.11 or newer (Debian 12 has it).
 # Every results file gets a <file>.runs.json with the code version, machine,
 # packages and data of each run; run from a git checkout, or ship SOURCE.json. The VM's service account (GCP) or instance
@@ -37,6 +41,8 @@ PR="$DATA/cmip6_pr_2000_2009.zarr"
 BAS="$DATA/basilisk_u.zarr"
 GLOB="$DATA/era5_global.zarr"
 STEPS=("$@")
+GAP=(${GAPS:+--gap-sweep})
+from() { [ -n "${THRESHOLDS:-}" ] && echo "--thresholds-from $THRESHOLDS/$1"; }
 [ ${#STEPS[@]} -eq 0 ] && STEPS=(setup fetch prepare prepare_bits exp1 exp2 ablation
     memory build sensitivity local fetch_pr prepare_pr exp2_pr fetch_bas prepare_bas
     exp2_bas summary)
@@ -88,7 +94,8 @@ step_exp2() {
     cd "$EXP"
     "$PY" exp2_threshold_query.py run "$TEN" "$BUCKET/era10y" \
         "$OUT/exp2_threshold_query.jsonl" --reps "${EXP2_REPS:-30}" --cache "$DATA/tmp" \
-        ${EXP2_LAYOUTS:+--layouts "$EXP2_LAYOUTS"} ${NT:+--nt "$NT"}
+        ${EXP2_LAYOUTS:+--layouts "$EXP2_LAYOUTS"} ${NT:+--nt "$NT"} "${GAP[@]}" \
+        $(from exp2_threshold_query.jsonl)
 }
 
 # k8-z and k8t-z next to exp2's stores; with EXP2_LAYOUTS=k8t,k8,k8t-z,k8-z, exp2 then
@@ -114,7 +121,8 @@ step_prepare_pr() {
 step_exp2_pr() {
     cd "$EXP"
     "$PY" exp2_threshold_query.py run "$PR" "$BUCKET/cmip6pr" "$OUT/exp2_cmip6_pr.jsonl" \
-        --reps "${EXP2_REPS:-30}" --cache "$DATA/tmp" --vars pr --tight ${NT:+--nt "$NT"}
+        --reps "${EXP2_REPS:-30}" --cache "$DATA/tmp" --vars pr --tight ${NT:+--nt "$NT"} \
+        "${GAP[@]}" $(from exp2_cmip6_pr.jsonl)
 }
 
 step_fetch_bas() {
@@ -133,7 +141,8 @@ step_exp2_bas() {
     cd "$EXP"
     "$PY" exp2_threshold_query.py run "$BAS" "$BUCKET/basilisk" \
         "$OUT/exp2_basilisk_u.jsonl" --reps "${EXP2_REPS:-30}" --cache "$DATA/tmp" \
-        --vars u --layouts k8t,k8,k8t-z,k8-z ${NT:+--nt "$NT"}
+        --vars u --layouts k8t,k8,k8t-z,k8-z ${NT:+--nt "$NT"} "${GAP[@]}" \
+        $(from exp2_basilisk_u.jsonl)
 }
 
 # exp2 on ERA5 over most of the globe, GLOB_FIRST to GLOB_LAST (default 2000 only,
@@ -170,6 +179,24 @@ step_exp2_glob_o() {
         ${NT:+--nt "$NT"}
 }
 
+# exp2_glob_o's stores at several merge gaps for SkipZFP and Zarr sharding
+step_exp2_glob_gap() {
+    cd "$EXP"
+    SKIPZFP_OBJECT="${GLOB_OBJECT:-64x320x640}" "$PY" exp2_threshold_query.py run \
+        "$GLOB" "$BUCKET/global_o" "$OUT/exp2_global_gap.jsonl" \
+        --reps "${EXP2_REPS:-30}" --cache "$DATA/tmp" --chunk-root "$BUCKET/global" \
+        --gap-sweep ${NT:+--nt "$NT"}
+}
+
+# the ten European years at several numbers of requests in flight (CONCS)
+step_exp2_eu_conc() {
+    cd "$EXP"
+    "$PY" exp2_threshold_query.py run "$TEN" "$BUCKET/era10y" "$OUT/exp2_eu_conc.jsonl" \
+        --reps "${EXP2_REPS:-5}" --concurrency-sweep "${CONCS:-64,128,256,512}" \
+        --sels "${SELS:-0.01,0.5}" \
+        --thresholds-from "$EXP/results/exp2_threshold_query.jsonl"
+}
+
 # the memory limits on the global ERA5, with exp2_glob's thresholds
 step_memory_glob() {
     cd "$EXP"
@@ -182,14 +209,14 @@ step_ablation() {
     cd "$EXP"
     "$PY" ablation.py run "$TEN" "$BUCKET/era10y" "$OUT/ablation.jsonl" \
         --reps "${ABL_REPS:-20}" --tail-reps "${TAIL_REPS:-30}" --cache "$DATA/tmp" \
-        ${NT:+--nt "$NT"}
+        ${NT:+--nt "$NT"} $(from exp2_threshold_query.jsonl)
 }
 
 step_memory() {
     cd "$EXP"
     "$PY" memory_limit.py run "$TEN" "$BUCKET/era10y" "$OUT/memory_limit.jsonl" \
         --limits "${LIMITS:-1G,2G,4G,none}" --reps "${MEM_REPS:-3}" --cache "$DATA/tmp" \
-        ${NT:+--nt "$NT"}
+        ${NT:+--nt "$NT"} $(from exp2_threshold_query.jsonl)
 }
 
 step_build() {

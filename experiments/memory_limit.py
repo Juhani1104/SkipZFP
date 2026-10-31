@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-from exp2_threshold_query import thresholds
+from exp2_threshold_query import thresholds, thresholds_from
 
 from common import VARS, start_run, store_url
 
@@ -68,22 +68,10 @@ def scope_prefix(limit):
     ]
 
 
-def thresholds_from(path):
-    """The thresholds and exact counts recorded in exp2's results, as thresholds returns."""
-    seen = {}
-    for line in open(path):
-        r = json.loads(line)
-        if r["sel"] in SELECTIVITIES:
-            seen[(r["var"], r["sel"])] = (r["threshold"], r["truth"])
-    ths = {v: [seen[(v, s)][0] for s in SELECTIVITIES] for v in VARS}
-    truth = {v: [seen[(v, s)][1] for s in SELECTIVITIES] for v in VARS}
-    return ths, truth
-
-
 def run(raw, root, out_path, limits, reps, nt=None, cache=None, from_exp2=None):
     run_id = start_run(
         out_path,
-        raw,
+        None if from_exp2 else raw,
         script="memory_limit",
         limits=limits,
         reps=reps,
@@ -91,7 +79,7 @@ def run(raw, root, out_path, limits, reps, nt=None, cache=None, from_exp2=None):
         thresholds_from=from_exp2,
     )
     if from_exp2:
-        ths, truth = thresholds_from(from_exp2)
+        ths, truth = thresholds_from(from_exp2, VARS, SELECTIVITIES)
     else:
         ths, truth = thresholds(raw, nt, cache=cache, selectivities=SELECTIVITIES)
     jobs = [
