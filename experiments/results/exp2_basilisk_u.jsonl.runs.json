@@ -1,24 +1,24 @@
 {
- "20261023T095943-a6e4d8": {
-  "started": "2026-10-23T09:59:43Z",
+ "20261026T213752-bd097a": {
+  "started": "2026-10-26T21:37:52Z",
   "source": {
-   "commit": "3a4dc2793c2416e5cc19a5c059ef976aa3ebb166",
+   "commit": "e10ddfdc9535678960493053b4e18e5fb4dd9fb7",
    "dirty": true,
-   "diff_sha256": "c4bec836ef0d2ed44b9011746593cfd5b4a01341900446047af394a787c1d2c9"
+   "diff_sha256": "6a01610157dc4ecdb3ee1dd9de0502925d2378e202bdffbc21634efe51547f43"
   },
   "machine": {
-   "host": "skipzfp-vm2",
-   "gce_machine_type": "n2-standard-16",
-   "gce_zone": "us-central1-a",
-   "cpu": "Intel(R) Xeon(R) CPU @ 2.80GHz",
+   "host": "skipzfp-c4n",
+   "gce_machine_type": "c4n-standard-16",
+   "gce_zone": "us-central1-b",
+   "cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
    "cpus": 16,
-   "mem_kb": 65854796,
+   "mem_kb": 61725028,
    "kernel": "6.1.0-54-cloud-amd64"
   },
   "calibration": {
-   "encode_chunk_s": 0.07342885000002752,
-   "decode_chunk_s": 0.037852739999948426,
-   "sum_512mb_s": 0.04475957900001504
+   "encode_chunk_s": 0.040147236000052544,
+   "decode_chunk_s": 0.02700781399994412,
+   "sum_512mb_s": 0.06572041900005843
   },
   "packages": {
    "python": "3.11.2",
@@ -85,6 +85,11 @@
   "nt": null,
   "vars": [
    "u"
-  ]
+  ],
+  "tight": false,
+  "chunk_root": null,
+  "gap_sweep": true,
+  "thresholds_from": null,
+  "concurrency_sweep": null
  }
 }
