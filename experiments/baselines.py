@@ -324,6 +324,28 @@ async def full_scan(arr, th, conc, kind):
     )
 
 
+def merge_runs(shard, offs, ends, gap):
+    """Group inner chunks, sorted by shard and then offset, into reads.
+
+    A read stops where the shard changes, or where the next chunk starts more than
+    gap bytes after the farthest end read so far in the same shard. Offsets count
+    from the start of each shard, so that farthest end starts again in every
+    shard. Returns the first index of every read and one past its last.
+    """
+    brk = np.ones(len(offs), bool)
+    if len(offs) > 1:
+        # adding shard * span makes the ends of each shard exceed those of every
+        # earlier shard, so one running maximum restarts in every shard
+        span = int(ends.max()) + 1
+        lift = shard.astype(np.int64) * span
+        run_end = np.maximum.accumulate(ends.astype(np.int64) + lift) - lift
+        brk[1:] = (shard[1:] != shard[:-1]) | (
+            offs[1:].astype(np.int64) - run_end[:-1] > gap
+        )
+    starts = np.flatnonzero(brk)
+    return starts, np.r_[starts[1:], len(offs)]
+
+
 async def inner_zm(arr, side, th, conc, gap=GAP_BYTES):
     t0 = time.perf_counter()
     stats_arr, index_arr = side["data_stats"], side["data_index"]
@@ -350,14 +372,7 @@ async def inner_zm(arr, side, th, conc, gap=GAP_BYTES):
     order = np.lexsort((offs, shard))
     shard, offs, sizes = shard[order], offs[order], sizes[order]
     ends = offs + sizes
-    brk = np.ones(len(offs), bool)
-    if len(offs) > 1:
-        run_end = np.maximum.accumulate(ends)
-        brk[1:] = (shard[1:] != shard[:-1]) | (
-            offs[1:].astype(np.int64) - run_end[:-1].astype(np.int64) > gap
-        )
-    starts = np.flatnonzero(brk)
-    stops = np.r_[starts[1:], len(offs)]
+    starts, stops = merge_runs(shard, offs, ends, gap)
     shard_keys = (
         _keys(arr, np.stack(np.unravel_index(shard[starts], grid), 1))
         if len(starts)
