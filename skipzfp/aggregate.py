@@ -415,12 +415,13 @@ async def _aggregate_pipelined(
     subs = lt.unit_grid_per_chunk
     chunks_per_step = lt.grid_shape[1] * lt.grid_shape[2]
     meta_size = lt.meta_size - 4 * (len(lt.layers) - 1)
+    meta_sizes: list[int] = []  # stored size of each zone map object
     last_meta = t0
     first_read = math.inf
 
     async def one(i: int) -> tuple[Any, ...]:
         nonlocal last_meta, first_read
-        data = await read_meta_object(store, mo, i, sem)
+        data = await read_meta_object(store, mo, i, sem, lt, meta_sizes)
         last_meta = max(last_meta, time.perf_counter())
         u0 = i * mo.t_chunk
         n_units = min(mo.t_chunk, lt.unit_grid[0] - u0)
@@ -470,7 +471,7 @@ async def _aggregate_pipelined(
         out_blocks=n_out,
         maybe_blocks=n_listed - n_in,
         total_blocks=len(keys) * lt.blocks_per_chunk,
-        metadata_bytes_read=mo.count * mo.size,
+        metadata_bytes_read=sum(meta_sizes),
         payload_bytes_read=payload_bytes,
         metadata_requests=mo.count,
         payload_requests=n_reqs,

@@ -1,0 +1,70 @@
+{
+ "20261026T203618-065db7": {
+  "started": "2026-10-26T20:36:18Z",
+  "source": {
+   "commit": "e10ddfdc9535678960493053b4e18e5fb4dd9fb7",
+   "dirty": true,
+   "diff_sha256": "7e83aefb6d332cb790ba9a516839da75046e274fa3a3c195f3b61fcaf1e62132"
+  },
+  "machine": {
+   "host": "skipzfp-c4n",
+   "gce_machine_type": "c4n-standard-8",
+   "gce_zone": "us-central1-b",
+   "cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+   "cpus": 8,
+   "mem_kb": 30810388,
+   "kernel": "6.1.0-54-cloud-amd64"
+  },
+  "calibration": {
+   "encode_chunk_s": 0.04719890800001281,
+   "decode_chunk_s": 0.026694559999995704,
+   "sum_512mb_s": 0.06863004800000283
+  },
+  "packages": {
+   "python": "3.11.2",
+   "numpy": "2.4.6",
+   "zarr": "3.1.6",
+   "obstore": "0.11.1",
+   "zfpy": "1.0.1",
+   "numcodecs": "0.16.5",
+   "skipzfp": "0.1.0",
+   "libzfp": "zfp version 1.0.1 (December 15, 2023)"
+  },
+  "data": null,
+  "fields": {
+   "seconds": "wall time of the query, from the first metadata read to the answer",
+   "open_seconds": "wall time to open the array (zarr.json), before the query",
+   "open_requests": "requests made while opening the array",
+   "metadata_seconds": "wall time until the zone map or indexes were read",
+   "planning_seconds": "planning time; with the pipeline, summed over objects",
+   "payload_seconds": "wall time from the first payload read to the last decode",
+   "decode_seconds": "decode time summed over every read, across threads, so it can exceed the wall time and must not be stacked with the others",
+   "requests": "requests made by the query, counted by a wrapper store",
+   "bytes": "bytes returned to the query, counted by a wrapper store",
+   "peak_rss_kb": "peak resident memory of the measuring process (VmHWM), page cache not included",
+   "cgroup_peak_bytes": "memory.peak of the job's cgroup, page cache included",
+   "peak_inflight_bytes": "most payload bytes reserved at once, from a read's start until its blocks are decoded: an upper bound on payload buffers, not memory used, since reads still downloading count too; see peak_rss_kb for memory"
+  },
+  "script": "exp2",
+  "reps": 5,
+  "layouts": [
+   "k8t",
+   "k8"
+  ],
+  "nt": null,
+  "vars": [
+   "t2m",
+   "ws"
+  ],
+  "tight": false,
+  "chunk_root": null,
+  "gap_sweep": false,
+  "thresholds_from": "/home/lucas710542/skipzfp-pr/experiments/results/exp2_threshold_query.jsonl",
+  "concurrency_sweep": [
+   64,
+   128,
+   256,
+   512
+  ]
+ }
+}

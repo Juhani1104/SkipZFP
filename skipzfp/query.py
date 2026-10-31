@@ -17,6 +17,7 @@ from typing import Any
 
 import numpy as np
 import zarr
+from numcodecs import Zstd
 from zarr.abc.store import RangeByteRequest
 from zarr.core.buffer import default_buffer_prototype
 from zarr.core.sync import sync
@@ -24,11 +25,14 @@ from zarr.core.sync import sync
 from ._native import check, load_library
 from .codec import (
     META_ATTR,
+    META_PACKING_ATTR,
     META_SOURCE_ATTR,
     META_T_CHUNK_ATTR,
+    PLANAR_ZSTD,
     check_source,
     find_codec,
     meta_size,
+    unpack_meta,
 )
 from .codec import native as codec_native
 
@@ -846,6 +850,8 @@ class _MetaObjects:
     t_chunk: int  # units along the first axis in each object
     rows: int  # bytes per unit along the first axis
     count: int
+    packed: bool = False  # objects are pack_meta's layout compressed with zstd
+    units: int = 0  # units along the first axis of the array
 
     @property
     def size(self) -> int:
@@ -870,13 +876,46 @@ def meta_objects(arr: zarr.Array, lt: _Layout) -> _MetaObjects | None:
         t_chunk=int(t_chunk),
         rows=int(np.prod(lt.unit_grid[1:])) * lt.meta_size,
         count=ceildiv(lt.unit_grid[0], int(t_chunk)),
+        packed=meta_packed(arr),
+        units=lt.unit_grid[0],
     )
 
 
+# decompresses packed zone map objects, which zarr's ZstdCodec wrote
+_zstd = Zstd()
+
+
+def meta_packed(arr: zarr.Array) -> bool:
+    """Return whether the zone map is packed, or raise ValueError if unknown."""
+    packing = arr.attrs.get(META_PACKING_ATTR)
+    if packing not in (None, PLANAR_ZSTD):
+        raise ValueError(f"unknown zone map packing {packing!r}")
+    return packing == PLANAR_ZSTD
+
+
+def unpack_records(data: np.ndarray, lt: _Layout, n_records: int) -> np.ndarray:
+    """Undo pack_meta on the first n_records records of a packed object."""
+    size = n_records * lt.meta_size
+    out = data.copy()
+    out[:size] = unpack_meta(
+        data[:size], lt.meta_size, 8 + 4 * len(lt.layers), lt.blocks_per_unit
+    ).reshape(-1)
+    return out
+
+
 async def read_meta_object(
-    store: Any, mo: _MetaObjects, i: int, sem: asyncio.Semaphore
+    store: Any,
+    mo: _MetaObjects,
+    i: int,
+    sem: asyncio.Semaphore,
+    lt: _Layout | None = None,
+    sizes: list[int] | None = None,
 ) -> np.ndarray:
-    """Read zone map object i, as a read-only view of the returned bytes."""
+    """Read zone map object i, as a read-only view of the returned bytes.
+
+    A packed object is decompressed and unpacked, in a worker thread, which
+    needs lt. sizes, if given, gets the object's stored size appended.
+    """
     key = f"{mo.prefix}/c/{i}/0/0/0"
     async with sem:
         buf = await store.get(key, prototype=default_buffer_prototype())
@@ -884,6 +923,13 @@ async def read_meta_object(
     if buf is None:
         raise FileNotFoundError(key)
     data = buf.as_numpy_array()
+    if sizes is not None:
+        sizes.append(len(data))
+    if mo.packed:
+        n = min(mo.t_chunk, mo.units - i * mo.t_chunk) * mo.rows // lt.meta_size
+        data = await asyncio.to_thread(
+            lambda: unpack_records(np.frombuffer(_zstd.decode(data), np.uint8), lt, n)
+        )
     if len(data) != mo.size:
         raise ValueError(
             f"metadata object {i} has {len(data)} bytes, which does not match "
@@ -912,12 +958,16 @@ async def read_meta(
     # each object is copied straight into its slot, the only copy made
     out = np.empty(mo.count * mo.size, dtype=np.uint8)
 
+    sizes: list[int] = []
+
     async def one(i: int) -> None:
-        out[i * mo.size : (i + 1) * mo.size] = await read_meta_object(store, mo, i, sem)
+        out[i * mo.size : (i + 1) * mo.size] = await read_meta_object(
+            store, mo, i, sem, lt, sizes
+        )
 
     await asyncio.gather(*(one(i) for i in range(mo.count)))
     # the last object is padded to a full t_chunk, so cut it back to the grid
-    return out[: lt.unit_grid[0] * mo.rows], mo.count * mo.size, mo.count
+    return out[: lt.unit_grid[0] * mo.rows], sum(sizes), mo.count
 
 
 async def read_meta_zarr(
@@ -936,7 +986,14 @@ async def read_meta_zarr(
 
     data = np.ascontiguousarray(await meta.getitem(...), dtype=np.uint8).reshape(-1)
     n_obj = int(np.prod([ceildiv(s, c) for s, c in zip(meta.shape, meta.chunks)]))
-    return data, data.nbytes, n_obj
+    nbytes = data.nbytes
+    if meta_packed(arr):
+        nbytes = await meta.nbytes_stored()
+        step = meta.chunks[0] * int(np.prod(lt.unit_grid[1:])) * lt.meta_size
+        for s in range(0, len(data), step):
+            part = data[s : s + step]
+            part[...] = unpack_records(part, lt, len(part) // lt.meta_size)
+    return data, nbytes, n_obj
 
 
 def plan_meta(meta: np.ndarray, lt: _Layout, layer: int) -> np.ndarray:
@@ -1350,6 +1407,7 @@ async def _query_pipelined(
     subs = lt.unit_grid_per_chunk
     chunks_per_step = lt.grid_shape[1] * lt.grid_shape[2]
     meta_size = lt.meta_size - 4 * (len(lt.layers) - 1)
+    meta_sizes: list[int] = []  # stored size of each zone map object
     last_meta = t0
     first_read = math.inf
     trace: dict[str, list[Any]] | None = (
@@ -1372,7 +1430,7 @@ async def _query_pipelined(
 
     async def one(i: int) -> tuple[int, ...]:
         nonlocal last_meta, first_read
-        data = await read_meta_object(store, mo, i, sem)
+        data = await read_meta_object(store, mo, i, sem, lt, meta_sizes)
         arrived = time.perf_counter()
         last_meta = max(last_meta, arrived)
         if trace is not None:
@@ -1423,7 +1481,7 @@ async def _query_pipelined(
         out_blocks=n_out,
         maybe_blocks=n_maybe,
         total_blocks=len(keys) * lt.blocks_per_chunk,
-        metadata_bytes_read=mo.count * mo.size,
+        metadata_bytes_read=sum(meta_sizes),
         payload_bytes_read=payload_bytes,
         metadata_requests=mo.count,
         payload_requests=n_reqs,

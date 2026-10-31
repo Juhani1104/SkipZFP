@@ -16,7 +16,9 @@ INT = ctypes.c_int
 PSZ = ctypes.POINTER(ctypes.c_size_t)
 SHAPE = (16, 16, 32)
 RATES = (0.25, 1.0, 2.0, 3.5, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0)
-LIBZFP, FAST, FAST_SCALAR = 0, 1, 2
+LIBZFP, FAST, FAST_SCALAR, FAST_SIMD_TRANSPOSE = 0, 1, 2, 3
+FAST_SIMD_TAIL, FAST_BMI2 = 4, 5
+FAST_MODES = (FAST, FAST_SCALAR, FAST_SIMD_TRANSPOSE, FAST_SIMD_TAIL, FAST_BMI2)
 
 
 @pytest.fixture(scope="module")
@@ -24,6 +26,7 @@ def lib():
     lib = ctypes.CDLL(str(_native.load_library()._name))
     lib.szfp_decode_blocks.argtypes = [P, SZ, SZ, DBL, INT, INT, P]
     lib.szfp_count_offsets.argtypes = [P, SZ, P, SZ, SZ, DBL, INT, DBL, PSZ]
+    lib.szfp_count_offsets_range.argtypes = [P, SZ, P, SZ, SZ, DBL, INT, DBL, DBL, PSZ]
     lib.szfp_fast_ok.argtypes = [INT, DBL, SZ]
     lib.szfp_set_fast_decode.argtypes = [INT]
     yield lib
@@ -61,11 +64,11 @@ def test_fast_decode_is_bit_exact(lib, name, rate):
     buf = codec.native().encode(fields()[name], rate, 4)
     nb = int(64 * rate / 8)
     ref = decode(lib, buf, nb, rate, LIBZFP).view(np.uint32)
-    assert np.array_equal(decode(lib, buf, nb, rate, FAST).view(np.uint32), ref)
-    assert np.array_equal(decode(lib, buf, nb, rate, FAST_SCALAR).view(np.uint32), ref)
+    for mode in FAST_MODES:
+        assert np.array_equal(decode(lib, buf, nb, rate, mode).view(np.uint32), ref)
 
 
-@pytest.mark.parametrize("mode", (LIBZFP, FAST, FAST_SCALAR))
+@pytest.mark.parametrize("mode", (LIBZFP, *FAST_MODES))
 def test_count_offsets_same_with_and_without_fast_path(lib, mode):
     buf = codec.native().encode(fields()["smooth"], 8.0, 4)
     offsets = np.arange(0, buf.size, 64 * 3, dtype=np.uint64)
@@ -95,3 +98,38 @@ def test_fast_ok_only_for_supported_layouts(lib):
     assert not lib.szfp_fast_ok(2, 8.0, 8)
     lib.szfp_set_fast_decode(LIBZFP)
     assert not lib.szfp_fast_ok(4, 8.0, 64)
+
+
+def count_range(lib, buf, nb, rate, lo, hi, mode):
+    lib.szfp_set_fast_decode(mode)
+    offsets = np.arange(0, buf.size, nb, dtype=np.uint64)
+    got = ctypes.c_size_t()
+    args = (buf.ctypes.data, buf.size, offsets.ctypes.data, offsets.size, nb, rate, 4)
+    assert lib.szfp_count_offsets_range(*args, lo, hi, ctypes.byref(got)) == 0
+    return got.value
+
+
+@pytest.mark.parametrize("name", ("smooth", "wild", "ints"))
+@pytest.mark.parametrize("rate", (2.0, 8.0, 32.0))
+def test_counting_in_simd_registers_counts_the_same(lib, name, rate):
+    """Counting with float bounds rounded down gives what the double comparisons
+    give, for bounds between floats, equal to decoded values, and infinite."""
+    a = fields()[name]
+    buf = codec.native().encode(a, rate, 4)
+    nb = int(64 * rate / 8)
+    dec = decode(lib, buf, nb, rate, LIBZFP)
+    finite = np.unique(dec[np.isfinite(dec)])
+    picks = finite[:: max(1, finite.size // 40)].astype(np.float64)
+    bounds = [-np.inf, np.inf, 0.0, -0.0, 1e300, -1e300]
+    for v in picks:  # a decoded value, and doubles just around it
+        bounds += [v, np.nextafter(v, np.inf), np.nextafter(v, -np.inf), v + 1e-30]
+    pairs = [(lo, np.inf) for lo in bounds] + [
+        (lo, hi) for lo, hi in zip(bounds[::3], bounds[1::3])
+    ]
+    for lo, hi in pairs:
+        want = count_range(lib, buf, nb, rate, lo, hi, LIBZFP)
+        d64 = dec.astype(np.float64)  # NumPy 2 would compare float32 with lo cast down
+        assert want == int(((d64 > lo) & (d64 <= hi)).sum())
+        for mode in FAST_MODES:
+            assert count_range(lib, buf, nb, rate, lo, hi, mode) == want, (lo, hi, mode)
+    lib.szfp_set_fast_decode(FAST)

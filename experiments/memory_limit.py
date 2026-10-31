@@ -2,6 +2,7 @@
 
 usage: python memory_limit.py run <raw.zarr> <root> <out.jsonl>
                                   [--limits 1G,2G,4G,none] [--reps 3] [--nt N] [--cache DIR]
+                                  [--thresholds-from exp2.jsonl]
 
 <root> holds the threshold suite from prepare_stores.py. Every job runs
 `exp2_threshold_query.py one` in a fresh systemd scope with MemoryMax set to the
@@ -12,6 +13,8 @@ cache) and, from the cgroup, memory.peak (page cache included) with the file and
 anon split at the end. SkipZFP also runs with a 128 MB limit on in-flight payload
 bytes, which bounds what it holds between reading and decoding. Each row records
 its run_id; <out.jsonl>.runs.json holds the code, machine, packages and data.
+--thresholds-from takes the thresholds and exact counts from exp2's results on the
+same data instead of computing them again, which on a large dataset takes hours.
 """
 
 import argparse
@@ -23,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-from exp2_threshold_query import thresholds
+from exp2_threshold_query import thresholds, thresholds_from
 
 from common import VARS, start_run, store_url
 
@@ -65,16 +68,20 @@ def scope_prefix(limit):
     ]
 
 
-def run(raw, root, out_path, limits, reps, nt=None, cache=None):
+def run(raw, root, out_path, limits, reps, nt=None, cache=None, from_exp2=None):
     run_id = start_run(
         out_path,
-        raw,
+        None if from_exp2 else raw,
         script="memory_limit",
         limits=limits,
         reps=reps,
         methods={k: list(v) for k, v in METHODS.items()},
+        thresholds_from=from_exp2,
     )
-    ths, truth = thresholds(raw, nt, cache=cache, selectivities=SELECTIVITIES)
+    if from_exp2:
+        ths, truth = thresholds_from(from_exp2, VARS, SELECTIVITIES)
+    else:
+        ths, truth = thresholds(raw, nt, cache=cache, selectivities=SELECTIVITIES)
     jobs = [
         dict(var=v, name=m, sel=s, limit=lim, rep=r)
         for v in VARS
@@ -142,8 +149,18 @@ if __name__ == "__main__":
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--nt", type=int)
     ap.add_argument("--cache", help="directory for on-disk copies of the raw data")
+    ap.add_argument("--thresholds-from", help="exp2 results on the same data")
     args = ap.parse_args()
     if args.cache:
         Path(args.cache).mkdir(parents=True, exist_ok=True)
     limits = args.limits.split(",")
-    run(args.raw, args.root, args.out, limits, args.reps, args.nt, args.cache)
+    run(
+        args.raw,
+        args.root,
+        args.out,
+        limits,
+        args.reps,
+        args.nt,
+        args.cache,
+        args.thresholds_from,
+    )

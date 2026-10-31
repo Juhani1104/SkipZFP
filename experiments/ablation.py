@@ -1,14 +1,14 @@
 """Ablation: change one thing at a time in a SkipZFP threshold query on ten years of ERA5.
 
 usage: python ablation.py run <raw.zarr> <root> <out.jsonl> [--reps 5] [--tail-reps 30]
-                              [--nt N] [--cache DIR]
+                              [--nt N] [--cache DIR] [--thresholds-from F]
 
 <root> holds the threshold and bits suites from prepare_stores.py. Every config is
 the exp2 SkipZFP query (k8t, pipeline on, zero copy, 256 KB merge gap, no memory
 limit, COUNT) with exactly one factor changed, so the difference to its reference
 (the default, unless REFERENCE names another) is that factor's effect: the pipeline, the copy before decoding, the merge gap, the
 block order, 4-bit per-block error bounds, block pruning itself (a full scan with the
-same decoder), reading the zone map through zarr instead of by key, and AVG instead
+same decoder), the decoder before the SIMD one, reading the zone map through zarr instead of by key, and AVG instead
 of COUNT, with and without 4-bit bounds and the pipeline. Two more configs record
 the timeline of every read with the pipeline on and off. Every job runs in a fresh process through
 `exp2_threshold_query.py one`; jobs are shuffled so configs interleave in time, and
@@ -16,6 +16,8 @@ a rerun skips jobs already in <out.jsonl>. The default and the pipeline-off conf
 are also repeated --tail-reps times at two selectivities, for p95 and p99. The
 merge gap of 0 runs at the lowest selectivity only (see ONLY_AT): at higher ones it
 needs millions of requests per query.
+--thresholds-from takes the thresholds and exact counts from earlier exp2 results
+instead of computing them, so <raw.zarr> is not read.
 Each row records its run_id; <out.jsonl>.runs.json holds the code, machine,
 packages and data of each run.
 """
@@ -28,7 +30,7 @@ import sys
 import time
 from pathlib import Path
 
-from exp2_threshold_query import thresholds
+from exp2_threshold_query import thresholds, thresholds_from
 
 from common import VARS, start_run, store_url
 
@@ -36,6 +38,7 @@ SELECTIVITIES = [0.001, 0.01, 0.1, 0.5]
 TAIL_SELECTIVITIES = [0.01, 0.5]
 
 # name: (factor, method, layout, options); options are QueryOptions fields plus "op"
+# and "fast_decode"
 CONFIGS = {
     "default": ("none", "skipzfp", "k8t", {}),
     "pipeline_off": ("pipeline", "skipzfp", "k8t", {"pipeline": False}),
@@ -44,6 +47,8 @@ CONFIGS = {
     "gap_64k": ("merge_gap", "skipzfp", "k8t", {"merge_gap_blocks": 64_000 // 64}),
     "gap_850k": ("merge_gap", "skipzfp", "k8t", {"merge_gap_blocks": 850_000 // 64}),
     "order_c": ("block_order", "skipzfp", "k8", {}),
+    # the decoder before the SIMD inverse transform, bit planes and counting
+    "decoder_old": ("decoder", "skipzfp", "k8t", {"fast_decode": 3}),
     "bits4": ("summary_precision", "skipzfp", "k8t-b4", {}),
     "no_pruning": ("pruning", "fullscan_skipzfp", "k8t", {}),
     "avg": ("operator", "skipzfp", "k8t", {"op": "avg"}),
@@ -77,7 +82,12 @@ CONFIGS = {
 # adjacent blocks. Each is compared with the same inner chunks at 850 KB.
 for _inner in ("16x16x16", "64x16x32"):
     _tag = "zshard" + _inner.split("x")[0]
-    for _gap, _name in ((0, "0"), (256_000, "256k"), (850_000, "850k")):
+    for _gap, _name in (
+        (0, "0"),
+        (256_000, "256k"),
+        (850_000, "850k"),
+        (2_000_000, "2m"),
+    ):
         CONFIGS[f"{_tag}_gap_{_name}"] = (
             "baseline_merge_gap",
             "zshard_izm",
@@ -123,18 +133,22 @@ def jobs_for(reps, tail_reps):
     return jobs
 
 
-def run(raw, root, out_path, reps, tail_reps, nt=None, cache=None):
+def run(raw, root, out_path, reps, tail_reps, nt=None, cache=None, from_exp2=None):
     run_id = start_run(
         out_path,
-        raw,
+        None if from_exp2 else raw,
         script="ablation",
         reps=reps,
         tail_reps=tail_reps,
         configs={k: list(v) for k, v in CONFIGS.items()},
         reference=REFERENCE,
+        thresholds_from=from_exp2,
     )
     sels = sorted(set(SELECTIVITIES) | set(TAIL_SELECTIVITIES))
-    ths, truth = thresholds(raw, nt, cache=cache, selectivities=sels)
+    if from_exp2:
+        ths, truth = thresholds_from(from_exp2, VARS, sels)
+    else:
+        ths, truth = thresholds(raw, nt, cache=cache, selectivities=sels)
     jobs = jobs_for(reps, tail_reps)
 
     def key(j):
@@ -189,7 +203,20 @@ if __name__ == "__main__":
     ap.add_argument("--tail-reps", type=int, default=30)
     ap.add_argument("--nt", type=int)
     ap.add_argument("--cache", help="directory for on-disk copies of the raw data")
+    ap.add_argument(
+        "--thresholds-from",
+        help="exp2 results to take the thresholds and exact counts from",
+    )
     args = ap.parse_args()
     if args.cache:
         Path(args.cache).mkdir(parents=True, exist_ok=True)
-    run(args.raw, args.root, args.out, args.reps, args.tail_reps, args.nt, args.cache)
+    run(
+        args.raw,
+        args.root,
+        args.out,
+        args.reps,
+        args.tail_reps,
+        args.nt,
+        args.cache,
+        args.thresholds_from,
+    )

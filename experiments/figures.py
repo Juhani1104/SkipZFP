@@ -2,13 +2,15 @@
 
 usage: python figures.py <results dir> [--out DIR]
 
-Reads exp2_threshold_query.jsonl, ablation.jsonl and memory_limit.jsonl from
+Reads exp2_threshold_query.jsonl, exp2_cmip6_pr.jsonl, exp2_basilisk_u.jsonl,
+exp2_global.jsonl, exp2_global_o.jsonl, ablation.jsonl and memory_limit.jsonl from
 <results dir> (whichever exist) and writes PDF and PNG files to --out (default
 <results dir>/figures):
 
 - exp2_speedup: the fastest baseline's median time over each SkipZFP layout's, per
   selectivity, with 95% bootstrap intervals that pick the fastest baseline again in
-  every resample (summarize.best_ratio_ci).
+  every resample (summarize.best_ratio_ci); exp2_speedup_cmip6_pr,
+  exp2_speedup_basilisk_u and exp2_speedup_global the same for the other datasets.
 - ablation_time: each config's median time over its reference config's (the
   default unless the rows name another), per selectivity, with 95% bootstrap
   intervals.
@@ -46,7 +48,7 @@ def times(rows, **match):
     return [r["seconds"] for r in rows if all(r.get(k) == v for k, v in match.items())]
 
 
-def exp2_speedup(rows, out):
+def exp2_speedup(rows, out, name="exp2_speedup"):
     rng = random.Random(SEED)
     vars_ = sorted({r["var"] for r in rows})
     fig, axes = plt.subplots(
@@ -83,7 +85,7 @@ def exp2_speedup(rows, out):
         ax.set_title(var)
     axes[0].set_ylabel("speedup over fastest baseline")
     axes[-1].legend(frameon=False)
-    save(fig, out, "exp2_speedup")
+    save(fig, out, name)
 
 
 def ablation_time(rows, out):
@@ -257,6 +259,10 @@ def main(root, out):
     rows = load(root / "exp2_threshold_query.jsonl")
     if rows:
         exp2_speedup(rows, out)
+    for name in ("cmip6_pr", "basilisk_u", "global", "global_o"):
+        rows = load(root / f"exp2_{name}.jsonl")
+        if rows:
+            exp2_speedup(rows, out, f"exp2_speedup_{name}")
     rows = load(root / "ablation.jsonl")
     if rows:
         ablation_time(rows, out)

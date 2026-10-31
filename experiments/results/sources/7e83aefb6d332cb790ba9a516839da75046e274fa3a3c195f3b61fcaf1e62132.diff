@@ -1,0 +1,1001 @@
+diff --git a/experiments/baselines.py b/experiments/baselines.py
+index fb13950..242e945 100644
+--- a/experiments/baselines.py
++++ b/experiments/baselines.py
+@@ -324,6 +324,28 @@ async def full_scan(arr, th, conc, kind):
+     )
+ 
+ 
++def merge_runs(shard, offs, ends, gap):
++    """Group inner chunks, sorted by shard and then offset, into reads.
++
++    A read stops where the shard changes, or where the next chunk starts more than
++    gap bytes after the farthest end read so far in the same shard. Offsets count
++    from the start of each shard, so that farthest end starts again in every
++    shard. Returns the first index of every read and one past its last.
++    """
++    brk = np.ones(len(offs), bool)
++    if len(offs) > 1:
++        # adding shard * span makes the ends of each shard exceed those of every
++        # earlier shard, so one running maximum restarts in every shard
++        span = int(ends.max()) + 1
++        lift = shard.astype(np.int64) * span
++        run_end = np.maximum.accumulate(ends.astype(np.int64) + lift) - lift
++        brk[1:] = (shard[1:] != shard[:-1]) | (
++            offs[1:].astype(np.int64) - run_end[:-1] > gap
++        )
++    starts = np.flatnonzero(brk)
++    return starts, np.r_[starts[1:], len(offs)]
++
++
+ async def inner_zm(arr, side, th, conc, gap=GAP_BYTES):
+     t0 = time.perf_counter()
+     stats_arr, index_arr = side["data_stats"], side["data_index"]
+@@ -350,14 +372,7 @@ async def inner_zm(arr, side, th, conc, gap=GAP_BYTES):
+     order = np.lexsort((offs, shard))
+     shard, offs, sizes = shard[order], offs[order], sizes[order]
+     ends = offs + sizes
+-    brk = np.ones(len(offs), bool)
+-    if len(offs) > 1:
+-        run_end = np.maximum.accumulate(ends)
+-        brk[1:] = (shard[1:] != shard[:-1]) | (
+-            offs[1:].astype(np.int64) - run_end[:-1].astype(np.int64) > gap
+-        )
+-    starts = np.flatnonzero(brk)
+-    stops = np.r_[starts[1:], len(offs)]
++    starts, stops = merge_runs(shard, offs, ends, gap)
+     shard_keys = (
+         _keys(arr, np.stack(np.unravel_index(shard[starts], grid), 1))
+         if len(starts)
+diff --git a/experiments/common.py b/experiments/common.py
+index 91a2d03..c949763 100644
+--- a/experiments/common.py
++++ b/experiments/common.py
+@@ -25,7 +25,9 @@ GAP_BYTES = 850_000
+ # SkipZFP threshold queries: 256 KB to 850 KB run equally fast on GCS, and the
+ # smaller gap reads fewer bytes; 128 KB and below get slower (more requests)
+ SKIPZFP_GAP_BYTES = 256_000
+-CONCURRENCY = 128
++# requests in flight per query, the same for every method; SKIPZFP_CONCURRENCY sets
++# another value, as exp2's --concurrency-sweep does for each query process
++CONCURRENCY = int(os.environ.get("SKIPZFP_CONCURRENCY", "128"))
+ EMPTY = np.iinfo(np.uint64).max
+ VARS = ("t2m", "ws")
+ # time steps handled at once by code that must not hold a whole variable in memory;
+diff --git a/experiments/exp2_threshold_query.py b/experiments/exp2_threshold_query.py
+index 1ee6abb..b458d56 100644
+--- a/experiments/exp2_threshold_query.py
++++ b/experiments/exp2_threshold_query.py
+@@ -3,6 +3,8 @@
+ usage: python exp2_threshold_query.py run <raw.zarr> <root> <out.jsonl> [--reps 5]
+                                           [--layouts k8t,k8] [--nt N] [--vars t2m,ws]
+                                           [--tight] [--chunk-root ROOT]
++                                          [--gap-sweep] [--thresholds-from F]
++                                          [--concurrency-sweep 64,128] [--sels 0.01,0.5]
+        python exp2_threshold_query.py one <url> <method> <threshold> [<options>]
+ 
+ <options> is a JSON object for SkipZFP: "op" ("count" or "avg") plus any
+@@ -16,6 +18,13 @@ measures ZFP fixed-accuracy at the tolerance of `prepare_stores.py --suite tight
+ whose counts are as accurate as SkipZFP's, as size <chunk>-tight. --chunk-root
+ reads the chunked baselines (zstd and ZFP with chunk zone maps, and their full
+ scans) from another root, such as the threshold suite next to an objects suite.
++--gap-sweep instead measures SkipZFP k8t and Zarr sharding at several merge gaps,
++next to the zstd and ZFP chunk baselines, as sizes such as k8t@1M and 64x16x32@0.
++--concurrency-sweep measures SkipZFP k8t@1M, Zarr sharding 64x16x32@2M and zstd
++64x128x256 at each number of requests in flight, every method with the same one,
++at the selectivities of --sels.
++--thresholds-from takes the thresholds and exact counts from earlier exp2 results
++on the same data instead of computing them, so <raw.zarr> is not read.
+ Every
+ measurement runs in a fresh process; jobs are shuffled so methods interleave, and a
+ rerun skips jobs already in <out.jsonl>.
+@@ -24,6 +33,7 @@ rerun skips jobs already in <out.jsonl>.
+ import argparse
+ import dataclasses
+ import json
++import os
+ import random
+ import subprocess
+ import sys
+@@ -67,6 +77,34 @@ TIGHT_BASELINES = [
+     ("zfpacc_zm", "64x64x128-tight"),
+     ("zfpacc_zm", "64x128x256-tight"),
+ ]
++# merge gaps for --gap-sweep: (method, size@gap, options); SkipZFP gaps are in
++# 64-byte blocks (4000 is its default 256 KB), Zarr sharding's in bytes (850 KB)
++GAP_SWEEP = [
++    ("skipzfp", "k8t", {}),
++    ("skipzfp", "k8t@1M", {"merge_gap_blocks": 15625}),
++    ("skipzfp", "k8t@4M", {"merge_gap_blocks": 62500}),
++    *(
++        ("zshard_izm", f"{inner}{tag}", opts)
++        for inner in ("64x16x32", "16x16x16")
++        for tag, opts in (
++            ("", {}),
++            ("@0", {"gap_bytes": 0}),
++            ("@256K", {"gap_bytes": 256_000}),
++            ("@2M", {"gap_bytes": 2_000_000}),
++        )
++    ),
++    ("zstd_zm", "64x64x128", {}),
++    ("zstd_zm", "64x128x256", {}),
++    ("zfpacc_zm", "64x64x128", {}),
++    ("zfpacc_zm", "64x128x256", {}),
++]
++GAP_OPTS = {(m, sz): o for m, sz, o in GAP_SWEEP}
++# what --concurrency-sweep measures, with the merge gaps of GAP_SWEEP
++CONC_SWEEP = [
++    ("skipzfp", "k8t@1M"),
++    ("zshard_izm", "64x16x32@2M"),
++    ("zstd_zm", "64x128x256"),
++]
+ FULL_SCANS = [
+     ("fullscan_zstd", "64x128x256"),
+     ("fullscan_zfpacc", "64x128x256"),
+@@ -224,10 +262,23 @@ def thresholds(
+     return ths, truth
+ 
+ 
+-def jobs_for(layouts, reps, variables=VARS, tight=False):
++def thresholds_from(path, variables=VARS, selectivities=SELECTIVITIES):
++    """The thresholds and exact counts recorded in exp2 results, as thresholds returns."""
++    seen = {}
++    for line in open(path):
++        r = json.loads(line)
++        seen[(r["var"], r["sel"])] = (r["threshold"], r["truth"])
++    ths = {v: [seen[(v, s)][0] for s in selectivities] for v in variables}
++    truth = {v: [seen[(v, s)][1] for s in selectivities] for v in variables}
++    return ths, truth
++
++
++def jobs_for(layouts, reps, variables=VARS, tight=False, gap_sweep=False):
+     methods = [("skipzfp", lay) for lay in layouts] + BASELINES
+     if tight:
+         methods += TIGHT_BASELINES
++    if gap_sweep:
++        methods = [(m, sz) for m, sz, _ in GAP_SWEEP]
+     jobs = [
+         dict(var=v, method=m, size=sz, sel=s, rep=r)
+         for v in variables
+@@ -238,7 +289,7 @@ def jobs_for(layouts, reps, variables=VARS, tight=False):
+     jobs += [
+         dict(var=v, method=m, size=sz, sel=FULL_SCAN_SELECTIVITY, rep=r)
+         for v in variables
+-        for m, sz in FULL_SCANS
++        for m, sz in ([] if gap_sweep else FULL_SCANS)
+         for r in range(reps)
+     ]
+     random.Random(10).shuffle(jobs)
+@@ -256,10 +307,14 @@ def run(
+     variables=VARS,
+     tight=False,
+     chunk_root=None,
++    gap_sweep=False,
++    from_exp2=None,
++    conc_sweep=None,
++    sels=None,
+ ):
+     run_id = start_run(
+         out_path,
+-        raw,
++        None if from_exp2 else raw,
+         script="exp2",
+         reps=reps,
+         layouts=layouts,
+@@ -267,12 +322,35 @@ def run(
+         vars=variables,
+         tight=tight,
+         chunk_root=chunk_root,
++        gap_sweep=gap_sweep,
++        thresholds_from=from_exp2,
++        concurrency_sweep=conc_sweep,
+     )
+-    ths, truth = thresholds(raw, nt, cache=cache, variables=variables)
+-    jobs = jobs_for(layouts, reps, variables, tight)
++    if from_exp2:
++        ths, truth = thresholds_from(from_exp2, variables)
++    else:
++        ths, truth = thresholds(raw, nt, cache=cache, variables=variables)
++    jobs = jobs_for(layouts, reps, variables, tight, gap_sweep)
++    if conc_sweep:
++        jobs = [
++            dict(var=v, method=m, size=sz, sel=sel, rep=r, concurrency=c)
++            for v in variables
++            for m, sz in CONC_SWEEP
++            for sel in sels or SELECTIVITIES
++            for c in conc_sweep
++            for r in range(reps)
++        ]
++        random.Random(11).shuffle(jobs)
+ 
+     def key(j):
+-        return (j["var"], j["method"], j["size"], j["sel"], j["rep"])
++        return (
++            j["var"],
++            j["method"],
++            j["size"],
++            j["sel"],
++            j["rep"],
++            j.get("concurrency"),
++        )
+ 
+     try:
+         done = {key(json.loads(line)) for line in open(out_path)}
+@@ -285,11 +363,18 @@ def run(
+         idx = SELECTIVITIES.index(j["sel"])
+         th = ths[j["var"]][idx]
+         chunked = j["method"] in CHUNKED and chunk_root
+-        url = store_url(
+-            chunk_root if chunked else root, j["var"], j["method"], j["size"]
+-        )
++        size = j["size"].partition("@")[0]  # a merge gap of --gap-sweep is not a store
++        url = store_url(chunk_root if chunked else root, j["var"], j["method"], size)
+         cmd = [sys.executable, str(Path(__file__)), "one", url, j["method"], repr(th)]
+-        p = subprocess.run(cmd, capture_output=True, text=True)
++        opts = (
++            GAP_OPTS.get((j["method"], j["size"])) if gap_sweep or conc_sweep else None
++        )
++        if opts:
++            cmd.append(json.dumps(opts))
++        env = dict(os.environ)
++        if j.get("concurrency"):
++            env["SKIPZFP_CONCURRENCY"] = str(j["concurrency"])
++        p = subprocess.run(cmd, capture_output=True, text=True, env=env)
+         if p.returncode != 0:
+             print("failed", j, p.stderr[-2000:], flush=True)
+             continue
+@@ -319,6 +404,12 @@ if __name__ == "__main__":
+     ap.add_argument("--vars", default=",".join(VARS))
+     ap.add_argument("--tight", action="store_true")
+     ap.add_argument("--chunk-root", help="where the chunked baselines are")
++    ap.add_argument("--gap-sweep", action="store_true")
++    ap.add_argument("--thresholds-from", help="earlier exp2 results on the same data")
++    ap.add_argument(
++        "--concurrency-sweep", help="requests in flight, such as 64,128,256"
++    )
++    ap.add_argument("--sels", help="selectivities, such as 0.01,0.5")
+     args = ap.parse_args()
+     if args.cache:
+         Path(args.cache).mkdir(parents=True, exist_ok=True)
+@@ -333,4 +424,10 @@ if __name__ == "__main__":
+         args.vars.split(","),
+         args.tight,
+         args.chunk_root,
++        args.gap_sweep,
++        args.thresholds_from,
++        [int(c) for c in args.concurrency_sweep.split(",")]
++        if args.concurrency_sweep
++        else None,
++        [float(x) for x in args.sels.split(",")] if args.sels else None,
+     )
+diff --git a/experiments/memory_limit.py b/experiments/memory_limit.py
+index 7a8e674..1d47aee 100644
+--- a/experiments/memory_limit.py
++++ b/experiments/memory_limit.py
+@@ -26,7 +26,7 @@ import sys
+ import time
+ from pathlib import Path
+ 
+-from exp2_threshold_query import thresholds
++from exp2_threshold_query import thresholds, thresholds_from
+ 
+ from common import VARS, start_run, store_url
+ 
+@@ -68,18 +68,6 @@ def scope_prefix(limit):
+     ]
+ 
+ 
+-def thresholds_from(path):
+-    """The thresholds and exact counts recorded in exp2's results, as thresholds returns."""
+-    seen = {}
+-    for line in open(path):
+-        r = json.loads(line)
+-        if r["sel"] in SELECTIVITIES:
+-            seen[(r["var"], r["sel"])] = (r["threshold"], r["truth"])
+-    ths = {v: [seen[(v, s)][0] for s in SELECTIVITIES] for v in VARS}
+-    truth = {v: [seen[(v, s)][1] for s in SELECTIVITIES] for v in VARS}
+-    return ths, truth
+-
+-
+ def run(raw, root, out_path, limits, reps, nt=None, cache=None, from_exp2=None):
+     run_id = start_run(
+         out_path,
+@@ -91,7 +79,7 @@ def run(raw, root, out_path, limits, reps, nt=None, cache=None, from_exp2=None):
+         thresholds_from=from_exp2,
+     )
+     if from_exp2:
+-        ths, truth = thresholds_from(from_exp2)
++        ths, truth = thresholds_from(from_exp2, VARS, SELECTIVITIES)
+     else:
+         ths, truth = thresholds(raw, nt, cache=cache, selectivities=SELECTIVITIES)
+     jobs = [
+diff --git a/experiments/run_cloud.sh b/experiments/run_cloud.sh
+index 0da36d2..236cd19 100755
+--- a/experiments/run_cloud.sh
++++ b/experiments/run_cloud.sh
+@@ -170,6 +170,33 @@ step_exp2_glob_o() {
+         ${NT:+--nt "$NT"}
+ }
+ 
++# exp2_glob_o's stores at several merge gaps for SkipZFP and Zarr sharding
++step_exp2_glob_gap() {
++    cd "$EXP"
++    SKIPZFP_OBJECT="${GLOB_OBJECT:-64x320x640}" "$PY" exp2_threshold_query.py run \
++        "$GLOB" "$BUCKET/global_o" "$OUT/exp2_global_gap.jsonl" \
++        --reps "${EXP2_REPS:-30}" --cache "$DATA/tmp" --chunk-root "$BUCKET/global" \
++        --gap-sweep ${NT:+--nt "$NT"}
++}
++
++# the ten European years at several merge gaps for SkipZFP and Zarr sharding, with
++# the thresholds of the published exp2 results, so the raw data is not needed
++step_exp2_eu_gap() {
++    cd "$EXP"
++    "$PY" exp2_threshold_query.py run "$TEN" "$BUCKET/era10y" "$OUT/exp2_eu_gap.jsonl" \
++        --reps "${EXP2_REPS:-30}" --gap-sweep \
++        --thresholds-from "$EXP/results/exp2_threshold_query.jsonl"
++}
++
++# the ten European years at several numbers of requests in flight (CONCS)
++step_exp2_eu_conc() {
++    cd "$EXP"
++    "$PY" exp2_threshold_query.py run "$TEN" "$BUCKET/era10y" "$OUT/exp2_eu_conc.jsonl" \
++        --reps "${EXP2_REPS:-5}" --concurrency-sweep "${CONCS:-64,128,256,512}" \
++        --sels "${SELS:-0.01,0.5}" \
++        --thresholds-from "$EXP/results/exp2_threshold_query.jsonl"
++}
++
+ # the memory limits on the global ERA5, with exp2_glob's thresholds
+ step_memory_glob() {
+     cd "$EXP"
+diff --git a/experiments/summarize.py b/experiments/summarize.py
+index bb897cd..6e31c2d 100644
+--- a/experiments/summarize.py
++++ b/experiments/summarize.py
+@@ -669,6 +669,8 @@ def main(root, out):
+         ("exp2 Basilisk u", "exp2_basilisk_u.jsonl"),
+         ("exp2 ERA5 global", "exp2_global.jsonl"),
+         ("exp2 ERA5 global, larger objects", "exp2_global_o.jsonl"),
++        ("exp2 ERA5 global, larger objects, merge gaps", "exp2_global_gap.jsonl"),
++        ("exp2 ERA5 Europe, merge gaps", "exp2_eu_gap.jsonl"),
+     ):
+         rows = load(root / file)
+         if rows:
+diff --git a/skipzfp/csrc/fastdec.c b/skipzfp/csrc/fastdec.c
+index 2f433d7..699d391 100644
+--- a/skipzfp/csrc/fastdec.c
++++ b/skipzfp/csrc/fastdec.c
+@@ -100,6 +100,114 @@ static inline int decode_planes(
+     return np;
+ }
+ 
++#ifdef SZFP_X86
++/* decode_planes with the group tests of a bit plane parsed at once. After the
++ * verbatim bits, every newly significant coefficient is coded as a group-test 1,
++ * a run of zeros and the coefficient's own 1, and the plane ends with a group-test
++ * 0; so in a window that starts with a 1 the set bits alternate between group
++ * tests and coefficients until a coefficient bit is followed by a 0. pdep picks
++ * every other set bit, the first coefficient bit followed by a 0 ends the plane,
++ * and pext of the window without the group-test bits gives the plane's new bits
++ * from coefficient n upwards. A plane the window does not hold whole, that would
++ * run out of bits, or that could reach coefficient 63, whose one bit is implied,
++ * goes through the loop of decode_planes instead. */
++__attribute__((target("bmi2,popcnt"))) static int decode_planes_bmi2(
++    const unsigned char* buf,
++    uint32_t pos,
++    uint32_t bits,
++    uint64_t planes[32]
++) {
++    uint32_t n = 0;
++    int k = 32;
++    int np = 0;
++
++    while (bits && k-- > 0) {
++        uint32_t m = n < bits ? n : bits;
++        uint64_t x;
++
++        bits -= m;
++        if (m <= 56) {
++            x = m ? peek(buf, pos) & ((1ull << m) - 1) : 0;
++            pos += m;
++        } else {
++            x = peek(buf, pos) & 0xffffffffull;
++            x |= (peek(buf, pos + 32) & ((1ull << (m - 32)) - 1)) << 32;
++            pos += m;
++        }
++
++        if (bits && n < 64) {
++            uint64_t w = peek(buf, pos) & ((1ull << 57) - 1);
++
++            if (!(w & 1)) { /* no new coefficient in this plane */
++                bits--;
++                pos++;
++                planes[np++] = x;
++                continue;
++            }
++            {
++                uint64_t g = _pdep_u64(0x5555555555555555ull, w);
++                uint64_t s = _pdep_u64(0xAAAAAAAAAAAAAAAAull, w);
++                /* a coefficient bit followed by a 0, that 0 inside the window */
++                uint64_t end = s & ~(w >> 1) & ((1ull << 56) - 1);
++
++                if (end) {
++                    uint32_t e = (uint32_t)__builtin_ctzll(end);
++                    uint32_t used = e + 2;
++                    uint64_t keep = ((2ull << e) - 1) & ~g;
++                    uint32_t add = (uint32_t)__builtin_popcountll(keep);
++
++                    if (used <= bits && n + add < 63) {
++                        x |= _pext_u64(w, keep) << n;
++                        n += add;
++                        bits -= used;
++                        pos += used;
++                        planes[np++] = x;
++                        continue;
++                    }
++                }
++            }
++        }
++
++        while (bits && n < 64) {
++            uint32_t lim_all;
++
++            bits--;
++            if (!(peek(buf, pos++) & 1)) {
++                break;
++            }
++
++            lim_all = 63 - n;
++            if (lim_all > bits) {
++                lim_all = bits;
++            }
++            for (;;) {
++                uint64_t w = peek(buf, pos);
++                uint32_t lim = lim_all < 56 ? lim_all : 56;
++                uint32_t z = w ? (uint32_t)__builtin_ctzll(w) : 64;
++
++                if (z < lim) {
++                    n += z;
++                    bits -= z + 1;
++                    pos += z + 1;
++                    break;
++                }
++                n += lim;
++                bits -= lim;
++                pos += lim;
++                lim_all -= lim;
++                if (!lim_all) {
++                    break;
++                }
++            }
++            x += 1ull << n;
++            n++;
++        }
++        planes[np++] = x;
++    }
++    return np;
++}
++#endif
++
+ static void transpose_scalar(const uint64_t* planes, int np, uint32_t* u) {
+     memset(u, 0, 64 * sizeof(uint32_t));
+     for (int j = 0; j < np; j++) {
+@@ -137,20 +245,6 @@ transpose_avx512(const uint64_t* planes, int np, uint32_t* u) {
+ 
+ typedef void (*TransposeFn)(const uint64_t*, int, uint32_t*);
+ 
+-static TransposeFn transpose_best = transpose_scalar;
+-static TransposeFn transpose = transpose_scalar;
+-
+-/* pick the transpose once at load time so decoding threads never race on it */
+-__attribute__((constructor)) static void pick_transpose(void) {
+-#ifdef SZFP_X86
+-    __builtin_cpu_init();
+-    if (__builtin_cpu_supports("avx512f")) {
+-        transpose_best = transpose_avx512;
+-    }
+-#endif
+-    transpose = transpose_best;
+-}
+-
+ static inline void inv_lift(int32_t* p, int s) {
+     int32_t x = p[0];
+     int32_t y = p[s];
+@@ -178,11 +272,208 @@ static inline void inv_lift(int32_t* p, int s) {
+     p[3 * s] = w;
+ }
+ 
++/* from the transposed coefficients u to the 64 values: negabinary to two's
++ * complement, zfp's coefficient order, the inverse transform along z, y and x,
++ * and the scaling by 2^(emax - 30) */
++static void tail_scalar(const uint32_t* u, int emax, float* out) {
++    int32_t iblock[64];
++    float s;
++
++    for (int i = 0; i < 64; i++) {
++        iblock[PERM[i]] = (int32_t)((u[i] ^ NBMASK) - NBMASK);
++    }
++
++    for (int y = 0; y < 4; y++) {
++        for (int x = 0; x < 4; x++) {
++            inv_lift(iblock + x + 4 * y, 16);
++        }
++    }
++    for (int x = 0; x < 4; x++) {
++        for (int z = 0; z < 4; z++) {
++            inv_lift(iblock + 16 * z + x, 4);
++        }
++    }
++    for (int z = 0; z < 4; z++) {
++        for (int y = 0; y < 4; y++) {
++            inv_lift(iblock + 4 * y + 16 * z, 1);
++        }
++    }
++
++    s = ldexpf(1.0f, emax - 30);
++    for (int i = 0; i < 64; i++) {
++        out[i] = s * (float)iblock[i];
++    }
++}
++
++#ifdef SZFP_X86
++/* coefficient index of each value, the inverse of PERM, for the gathers */
++static int32_t INV[64];
++
++/* inv_lift on 16 independent lines at once, one per lane */
++__attribute__((target("avx512f"))) static inline void
++inv_lift_avx512(__m512i* px, __m512i* py, __m512i* pz, __m512i* pw) {
++    __m512i x = *px;
++    __m512i y = *py;
++    __m512i z = *pz;
++    __m512i w = *pw;
++
++    y = _mm512_add_epi32(y, _mm512_srai_epi32(w, 1));
++    w = _mm512_sub_epi32(w, _mm512_srai_epi32(y, 1));
++    y = _mm512_add_epi32(y, w);
++    w = _mm512_slli_epi32(w, 1);
++    w = _mm512_sub_epi32(w, y);
++    z = _mm512_add_epi32(z, x);
++    x = _mm512_slli_epi32(x, 1);
++    x = _mm512_sub_epi32(x, z);
++    y = _mm512_add_epi32(y, z);
++    z = _mm512_slli_epi32(z, 1);
++    z = _mm512_sub_epi32(z, y);
++    w = _mm512_add_epi32(w, x);
++    x = _mm512_slli_epi32(x, 1);
++    x = _mm512_sub_epi32(x, w);
++
++    *px = x;
++    *py = y;
++    *pz = z;
++    *pw = w;
++}
++
++/* transpose the four 128-bit lanes across four vectors; its own inverse */
++__attribute__((target("avx512f"))) static inline void
++swap_lanes(__m512i* a, __m512i* b, __m512i* c, __m512i* d) {
++    __m512i t0 = _mm512_shuffle_i32x4(*a, *b, 0x44);
++    __m512i t1 = _mm512_shuffle_i32x4(*a, *b, 0xEE);
++    __m512i t2 = _mm512_shuffle_i32x4(*c, *d, 0x44);
++    __m512i t3 = _mm512_shuffle_i32x4(*c, *d, 0xEE);
++
++    *a = _mm512_shuffle_i32x4(t0, t2, 0x88);
++    *b = _mm512_shuffle_i32x4(t0, t2, 0xDD);
++    *c = _mm512_shuffle_i32x4(t1, t3, 0x88);
++    *d = _mm512_shuffle_i32x4(t1, t3, 0xDD);
++}
++
++/* transpose the four 32-bit values inside every 128-bit lane; its own inverse */
++__attribute__((target("avx512f"))) static inline void
++swap_values(__m512i* a, __m512i* b, __m512i* c, __m512i* d) {
++    __m512i p = _mm512_unpacklo_epi32(*a, *b);
++    __m512i q = _mm512_unpackhi_epi32(*a, *b);
++    __m512i r = _mm512_unpacklo_epi32(*c, *d);
++    __m512i t = _mm512_unpackhi_epi32(*c, *d);
++
++    *a = _mm512_unpacklo_epi64(p, r);
++    *b = _mm512_unpackhi_epi64(p, r);
++    *c = _mm512_unpacklo_epi64(q, t);
++    *d = _mm512_unpackhi_epi64(q, t);
++}
++
++/* tail_scalar on vectors: v[z] holds the 16 values x + 4y of plane z, so the z
++ * pass works on whole vectors; the y and x passes do too after swapping lanes and
++ * values, which are swapped back before the scaling */
++__attribute__((target("avx512f"))) static void
++tail_avx512(const uint32_t* u, int emax, float* out) {
++    const __m512i nb = _mm512_set1_epi32((int)NBMASK);
++    __m512i v[4];
++    __m512 s;
++
++    for (int z = 0; z < 4; z++) {
++        __m512i idx = _mm512_loadu_si512(INV + 16 * z);
++        __m512i c = _mm512_i32gather_epi32(idx, (const void*)u, 4);
++        v[z] = _mm512_sub_epi32(_mm512_xor_si512(c, nb), nb);
++    }
++
++    inv_lift_avx512(&v[0], &v[1], &v[2], &v[3]); /* along z */
++    swap_lanes(&v[0], &v[1], &v[2], &v[3]);      /* v[y], lanes x + 4z */
++    inv_lift_avx512(&v[0], &v[1], &v[2], &v[3]); /* along y */
++    swap_values(&v[0], &v[1], &v[2], &v[3]);     /* v[x], lanes y + 4z */
++    inv_lift_avx512(&v[0], &v[1], &v[2], &v[3]); /* along x */
++    swap_values(&v[0], &v[1], &v[2], &v[3]);
++    swap_lanes(&v[0], &v[1], &v[2], &v[3]);      /* v[z] again */
++
++    s = _mm512_set1_ps(ldexpf(1.0f, emax - 30));
++    for (int z = 0; z < 4; z++) {
++        _mm512_storeu_ps(out + 16 * z, _mm512_mul_ps(s, _mm512_cvtepi32_ps(v[z])));
++    }
++}
++
++/* tail_avx512 that counts lo < v <= hi instead of storing the values; the order
++ * of the values does not matter for that, so they are not swapped back */
++__attribute__((target("avx512f"))) static size_t
++tail_count_avx512(const uint32_t* u, int emax, float lo_f, float hi_f) {
++    const __m512i nb = _mm512_set1_epi32((int)NBMASK);
++    const __m512 lo = _mm512_set1_ps(lo_f);
++    const __m512 hi = _mm512_set1_ps(hi_f);
++    __m512i v[4];
++    __m512 s = _mm512_set1_ps(ldexpf(1.0f, emax - 30));
++    size_t count = 0;
++
++    for (int z = 0; z < 4; z++) {
++        __m512i idx = _mm512_loadu_si512(INV + 16 * z);
++        __m512i c = _mm512_i32gather_epi32(idx, (const void*)u, 4);
++        v[z] = _mm512_sub_epi32(_mm512_xor_si512(c, nb), nb);
++    }
++
++    inv_lift_avx512(&v[0], &v[1], &v[2], &v[3]);
++    swap_lanes(&v[0], &v[1], &v[2], &v[3]);
++    inv_lift_avx512(&v[0], &v[1], &v[2], &v[3]);
++    swap_values(&v[0], &v[1], &v[2], &v[3]);
++    inv_lift_avx512(&v[0], &v[1], &v[2], &v[3]);
++
++    for (int z = 0; z < 4; z++) {
++        __m512 x = _mm512_mul_ps(s, _mm512_cvtepi32_ps(v[z]));
++        __mmask16 in = _mm512_cmp_ps_mask(x, lo, _CMP_GT_OQ) &
++                       _mm512_cmp_ps_mask(x, hi, _CMP_LE_OQ);
++        count += (size_t)__builtin_popcount((unsigned)in);
++    }
++    return count;
++}
++#endif
++
++typedef void (*TailFn)(const uint32_t*, int, float*);
++typedef int (*PlanesFn)(const unsigned char*, uint32_t, uint32_t, uint64_t*);
++
++static TransposeFn transpose_best = transpose_scalar;
++static TransposeFn transpose = transpose_scalar;
++static TailFn tail_best = tail_scalar;
++static TailFn tail = tail_scalar;
++static PlanesFn planes_best = decode_planes;
++static PlanesFn planes = decode_planes;
++static int count_best = 0; /* whether tail_count_avx512 can run */
++static int count_fused = 0;
++
++/* pick the SIMD steps once at load time so decoding threads never race on them */
++__attribute__((constructor)) static void pick_simd(void) {
++#ifdef SZFP_X86
++    for (int i = 0; i < 64; i++) {
++        INV[PERM[i]] = i;
++    }
++    __builtin_cpu_init();
++    if (__builtin_cpu_supports("avx512f")) {
++        transpose_best = transpose_avx512;
++        tail_best = tail_avx512;
++        count_best = 1;
++    }
++    if (__builtin_cpu_supports("bmi2") && __builtin_cpu_supports("popcnt")) {
++        planes_best = decode_planes_bmi2;
++    }
++#endif
++    transpose = transpose_best;
++    tail = tail_best;
++    planes = planes_best;
++    count_fused = count_best;
++}
++
+ static int fast_enabled = 1;
+ 
+ void szfp_set_fast_decode(int mode) {
+     fast_enabled = mode != 0;
+     transpose = mode == 2 ? transpose_scalar : transpose_best;
++    tail = mode == 2 || mode == 3 ? tail_scalar : tail_best;
++    planes = mode == 1 || mode == 5 ? planes_best : decode_planes;
++    count_fused = mode == 1 ? count_best : 0;
++}
++
++int szfp_fast_count_ok(void) {
++    return fast_enabled && count_fused;
+ }
+ 
+ int szfp_fast_ok(int block_dim, double rate, size_t block_nbytes) {
+@@ -193,12 +484,10 @@ int szfp_fast_ok(int block_dim, double rate, size_t block_nbytes) {
+ 
+ void szfp_fast_decode(const unsigned char* src, size_t block_nbytes, float* out) {
+     unsigned char buf[SZFP_FAST_MAX_BYTES + 8];
+-    uint64_t planes[32];
++    uint64_t bit_planes[32];
+     uint32_t u[64];
+-    int32_t iblock[64];
+     int np;
+     int emax;
+-    float s;
+ 
+     memcpy(buf, src, block_nbytes);
+     memset(buf + block_nbytes, 0, 8);
+@@ -209,31 +498,35 @@ void szfp_fast_decode(const unsigned char* src, size_t block_nbytes, float* out)
+     }
+ 
+     emax = (int)((peek(buf, 1)) & 0xff) - 127;
+-    np = decode_planes(buf, 9, (uint32_t)(8 * block_nbytes) - 9, planes);
+-    transpose(planes, np, u);
++    np = planes(buf, 9, (uint32_t)(8 * block_nbytes) - 9, bit_planes);
++    transpose(bit_planes, np, u);
++    tail(u, emax, out);
++}
+ 
+-    for (int i = 0; i < 64; i++) {
+-        iblock[PERM[i]] = (int32_t)((u[i] ^ NBMASK) - NBMASK);
+-    }
++size_t szfp_fast_count(const unsigned char* src, size_t block_nbytes, float lo, float hi) {
++#ifdef SZFP_X86
++    unsigned char buf[SZFP_FAST_MAX_BYTES + 8];
++    uint64_t bit_planes[32];
++    uint32_t u[64];
++    int np;
++    int emax;
+ 
+-    for (int y = 0; y < 4; y++) {
+-        for (int x = 0; x < 4; x++) {
+-            inv_lift(iblock + x + 4 * y, 16);
+-        }
+-    }
+-    for (int x = 0; x < 4; x++) {
+-        for (int z = 0; z < 4; z++) {
+-            inv_lift(iblock + 16 * z + x, 4);
+-        }
+-    }
+-    for (int z = 0; z < 4; z++) {
+-        for (int y = 0; y < 4; y++) {
+-            inv_lift(iblock + 4 * y + 16 * z, 1);
+-        }
+-    }
++    memcpy(buf, src, block_nbytes);
++    memset(buf + block_nbytes, 0, 8);
+ 
+-    s = ldexpf(1.0f, emax - 30);
+-    for (int i = 0; i < 64; i++) {
+-        out[i] = s * (float)iblock[i];
++    if (!(buf[0] & 1)) { /* an all-zero block */
++        return (0.0f > lo && 0.0f <= hi) ? 64 : 0;
+     }
++
++    emax = (int)((peek(buf, 1)) & 0xff) - 127;
++    np = planes(buf, 9, (uint32_t)(8 * block_nbytes) - 9, bit_planes);
++    transpose(bit_planes, np, u);
++    return tail_count_avx512(u, emax, lo, hi);
++#else
++    (void)src;
++    (void)block_nbytes;
++    (void)lo;
++    (void)hi;
++    return 0;
++#endif
+ }
+diff --git a/skipzfp/csrc/fastdec.h b/skipzfp/csrc/fastdec.h
+index 5487149..964894e 100644
+--- a/skipzfp/csrc/fastdec.h
++++ b/skipzfp/csrc/fastdec.h
+@@ -11,9 +11,11 @@ enum { SZFP_FAST_MAX_BYTES = 256 };
+ /**
+  * @brief Choose how blocks are decoded, mainly for tests and benchmarks.
+  *
+- * @param[in] mode 1 (default) uses the fast path, 0 sends every block through
+- *                 libzfp, and 2 uses the fast path with the portable
+- *                 (non-SIMD) bit-plane transpose.
++ * @param[in] mode 1 (default) uses the fast path with every speedup the CPU
++ *                 supports, 0 sends every block through libzfp, 2 uses the fast
++ *                 path with no SIMD at all, 3 with the SIMD bit-plane transpose
++ *                 only, 4 adds the SIMD inverse transform, and 5 also the BMI2
++ *                 bit-plane decoder; 1 adds to 5 counting in SIMD registers.
+  */
+ void szfp_set_fast_decode(int mode);
+ 
+@@ -38,4 +40,19 @@ int szfp_fast_ok(int block_dim, double rate, size_t block_nbytes);
+  */
+ void szfp_fast_decode(const unsigned char* src, size_t block_nbytes, float* out);
+ 
++/**
++ * @brief Return nonzero if szfp_fast_count() can be used, which needs AVX-512.
++ */
++int szfp_fast_count_ok(void);
++
++/**
++ * @brief Count the values lo < v <= hi of one block without storing them.
++ *
++ * The bounds are floats: for float values, v > lo for a double lo is the same as
++ * v > the largest float not above lo, and likewise for v <= hi, so callers round
++ * their double bounds down to float first. The caller must check
++ * szfp_fast_ok() and szfp_fast_count_ok() first.
++ */
++size_t szfp_fast_count(const unsigned char* src, size_t block_nbytes, float lo, float hi);
++
+ #endif
+diff --git a/skipzfp/csrc/query.c b/skipzfp/csrc/query.c
+index a8c4440..ef13187 100644
+--- a/skipzfp/csrc/query.c
++++ b/skipzfp/csrc/query.c
+@@ -22,6 +22,17 @@ static inline int in_range(float v, double lo, double hi) {
+     return (d > lo) & (d <= hi); /* & rather than && keeps the loop branch-free */
+ }
+ 
++/* the largest float not above d, so that for every float v, v > d exactly when
++ * v > float_at_most(d), and v <= d exactly when v <= float_at_most(d) */
++static float float_at_most(double d) {
++    float f = (float)d;
++
++    if ((double)f > d) {
++        f = nextafterf(f, -INFINITY);
++    }
++    return f;
++}
++
+ /* count values with lo < v <= hi; an open upper end takes the same single
+  * comparison as the x > T path, so it costs the same */
+ static size_t count_in_range(const float* v, size_t n, double lo, double hi) {
+@@ -812,7 +823,14 @@ int szfp_count_offsets_range(
+         }
+     }
+ 
+-    if (szfp_fast_ok(block_dim, rate, block_nbytes)) {
++    if (szfp_fast_ok(block_dim, rate, block_nbytes) && szfp_fast_count_ok()) {
++        float lo_f = float_at_most(lo);
++        float hi_f = float_at_most(hi);
++
++        for (size_t i = 0; i < n; i++) {
++            count += szfp_fast_count(buf + offsets[i], block_nbytes, lo_f, hi_f);
++        }
++    } else if (szfp_fast_ok(block_dim, rate, block_nbytes)) {
+         for (size_t i = 0; i < n; i++) {
+             szfp_fast_decode(buf + offsets[i], block_nbytes, vals);
+ 
+diff --git a/tests/test_experiment_baselines.py b/tests/test_experiment_baselines.py
+new file mode 100644
+index 0000000..fa4a015
+--- /dev/null
++++ b/tests/test_experiment_baselines.py
+@@ -0,0 +1,57 @@
++"""The Zarr sharding baseline of the experiments merges reads within each shard."""
++
++import sys
++from pathlib import Path
++
++import numpy as np
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "experiments"))
++import baselines  # noqa: E402
++
++
++def reads(shard, offs, sizes, gap):
++    shard, offs = np.asarray(shard), np.asarray(offs, np.uint64)
++    ends = offs + np.asarray(sizes, np.uint64)
++    starts, stops = baselines.merge_runs(shard, offs, ends, gap)
++    return [
++        (int(shard[a]), int(offs[a]), int(ends[a:b].max()))
++        for a, b in zip(starts, stops)
++    ]
++
++
++def test_every_shard_merges_on_its_own():
++    # chunks 0 and 9 of two shards of ten 100-byte chunks: with no gap allowed,
++    # the second shard must not be read from its first chunk to its last
++    got = reads([0, 0, 1, 1], [0, 900, 0, 900], [100] * 4, gap=0)
++    assert got == [(0, 0, 100), (0, 900, 1000), (1, 0, 100), (1, 900, 1000)]
++
++
++def test_gap_merges_within_a_shard_only():
++    got = reads([0, 0, 1], [0, 150, 0], [100] * 3, gap=50)
++    assert got == [(0, 0, 250), (1, 0, 100)]
++    got = reads([0, 0, 1], [0, 150, 0], [100] * 3, gap=49)
++    assert got == [(0, 0, 100), (0, 150, 250), (1, 0, 100)]
++
++
++def test_matches_a_loop_over_shards():
++    rng = np.random.default_rng(3)
++    shard = np.sort(rng.integers(0, 40, 3000))
++    sizes = rng.integers(1, 5000, shard.size).astype(np.uint64)
++    offs = np.empty(shard.size, np.uint64)
++    for s in np.unique(shard):  # chunks of a shard laid out back to back, then thinned
++        i = np.flatnonzero(shard == s)
++        offs[i] = np.cumsum(sizes[i] + rng.integers(0, 3000, i.size).astype(np.uint64))
++    for gap in (0, 1000, 10_000):
++        want = []
++        for s in np.unique(shard):
++            i = np.flatnonzero(shard == s)
++            o, e = offs[i].astype(int), (offs[i] + sizes[i]).astype(int)
++            cur = [o[0], e[0]]
++            for a, b in zip(o[1:], e[1:]):
++                if a - cur[1] <= gap:
++                    cur[1] = max(cur[1], b)
++                else:
++                    want.append((int(s), *cur))
++                    cur = [a, b]
++            want.append((int(s), *cur))
++        assert reads(shard, offs, sizes, gap) == [tuple(map(int, r)) for r in want]
+diff --git a/tests/test_fastdec.py b/tests/test_fastdec.py
+index 07ef63a..94960a4 100644
+--- a/tests/test_fastdec.py
++++ b/tests/test_fastdec.py
+@@ -16,7 +16,9 @@ INT = ctypes.c_int
+ PSZ = ctypes.POINTER(ctypes.c_size_t)
+ SHAPE = (16, 16, 32)
+ RATES = (0.25, 1.0, 2.0, 3.5, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0)
+-LIBZFP, FAST, FAST_SCALAR = 0, 1, 2
++LIBZFP, FAST, FAST_SCALAR, FAST_SIMD_TRANSPOSE = 0, 1, 2, 3
++FAST_SIMD_TAIL, FAST_BMI2 = 4, 5
++FAST_MODES = (FAST, FAST_SCALAR, FAST_SIMD_TRANSPOSE, FAST_SIMD_TAIL, FAST_BMI2)
+ 
+ 
+ @pytest.fixture(scope="module")
+@@ -24,6 +26,7 @@ def lib():
+     lib = ctypes.CDLL(str(_native.load_library()._name))
+     lib.szfp_decode_blocks.argtypes = [P, SZ, SZ, DBL, INT, INT, P]
+     lib.szfp_count_offsets.argtypes = [P, SZ, P, SZ, SZ, DBL, INT, DBL, PSZ]
++    lib.szfp_count_offsets_range.argtypes = [P, SZ, P, SZ, SZ, DBL, INT, DBL, DBL, PSZ]
+     lib.szfp_fast_ok.argtypes = [INT, DBL, SZ]
+     lib.szfp_set_fast_decode.argtypes = [INT]
+     yield lib
+@@ -61,11 +64,11 @@ def test_fast_decode_is_bit_exact(lib, name, rate):
+     buf = codec.native().encode(fields()[name], rate, 4)
+     nb = int(64 * rate / 8)
+     ref = decode(lib, buf, nb, rate, LIBZFP).view(np.uint32)
+-    assert np.array_equal(decode(lib, buf, nb, rate, FAST).view(np.uint32), ref)
+-    assert np.array_equal(decode(lib, buf, nb, rate, FAST_SCALAR).view(np.uint32), ref)
++    for mode in FAST_MODES:
++        assert np.array_equal(decode(lib, buf, nb, rate, mode).view(np.uint32), ref)
+ 
+ 
+-@pytest.mark.parametrize("mode", (LIBZFP, FAST, FAST_SCALAR))
++@pytest.mark.parametrize("mode", (LIBZFP, *FAST_MODES))
+ def test_count_offsets_same_with_and_without_fast_path(lib, mode):
+     buf = codec.native().encode(fields()["smooth"], 8.0, 4)
+     offsets = np.arange(0, buf.size, 64 * 3, dtype=np.uint64)
+@@ -95,3 +98,38 @@ def test_fast_ok_only_for_supported_layouts(lib):
+     assert not lib.szfp_fast_ok(2, 8.0, 8)
+     lib.szfp_set_fast_decode(LIBZFP)
+     assert not lib.szfp_fast_ok(4, 8.0, 64)
++
++
++def count_range(lib, buf, nb, rate, lo, hi, mode):
++    lib.szfp_set_fast_decode(mode)
++    offsets = np.arange(0, buf.size, nb, dtype=np.uint64)
++    got = ctypes.c_size_t()
++    args = (buf.ctypes.data, buf.size, offsets.ctypes.data, offsets.size, nb, rate, 4)
++    assert lib.szfp_count_offsets_range(*args, lo, hi, ctypes.byref(got)) == 0
++    return got.value
++
++
++@pytest.mark.parametrize("name", ("smooth", "wild", "ints"))
++@pytest.mark.parametrize("rate", (2.0, 8.0, 32.0))
++def test_counting_in_simd_registers_counts_the_same(lib, name, rate):
++    """Counting with float bounds rounded down gives what the double comparisons
++    give, for bounds between floats, equal to decoded values, and infinite."""
++    a = fields()[name]
++    buf = codec.native().encode(a, rate, 4)
++    nb = int(64 * rate / 8)
++    dec = decode(lib, buf, nb, rate, LIBZFP)
++    finite = np.unique(dec[np.isfinite(dec)])
++    picks = finite[:: max(1, finite.size // 40)].astype(np.float64)
++    bounds = [-np.inf, np.inf, 0.0, -0.0, 1e300, -1e300]
++    for v in picks:  # a decoded value, and doubles just around it
++        bounds += [v, np.nextafter(v, np.inf), np.nextafter(v, -np.inf), v + 1e-30]
++    pairs = [(lo, np.inf) for lo in bounds] + [
++        (lo, hi) for lo, hi in zip(bounds[::3], bounds[1::3])
++    ]
++    for lo, hi in pairs:
++        want = count_range(lib, buf, nb, rate, lo, hi, LIBZFP)
++        d64 = dec.astype(np.float64)  # NumPy 2 would compare float32 with lo cast down
++        assert want == int(((d64 > lo) & (d64 <= hi)).sum())
++        for mode in FAST_MODES:
++            assert count_range(lib, buf, nb, rate, lo, hi, mode) == want, (lo, hi, mode)
++    lib.szfp_set_fast_decode(FAST)

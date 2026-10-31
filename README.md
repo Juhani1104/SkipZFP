@@ -19,7 +19,7 @@ match, skip them without reading them, and decode only those that might.
     <source media="(prefers-color-scheme: dark)" srcset=".github/speedup-dark.svg">
     <img src=".github/speedup-light.svg" width="760"
          alt="Threshold-query speedup over a zstd full scan on ten years of ERA5 temperature:
-              SkipZFP 5.4x at 0.1% selectivity down to 1.7x at 50%, above the best baseline throughout">
+              SkipZFP 4.7x at 0.1% selectivity down to 1.9x at 50%, above the best baseline throughout">
   </picture>
 </p>
 
@@ -29,8 +29,8 @@ from Google Cloud Storage.</sub>
 - **Reads only what can match.** Fixed-rate blocks sit at computable offsets, so the
   planner turns the surviving blocks straight into byte-range requests.
 - **Faster than every baseline, up to 50% selectivity.** On ten years of ERA5 2 m
-  temperature in Google Cloud Storage, threshold queries are 1.3–1.6x faster than the
-  fastest baseline from 1% to 50% selectivity, and 1.7–5.4x faster than a zstd full
+  temperature in Google Cloud Storage, threshold queries are 1.4–1.8x faster than the
+  fastest baseline from 1% to 50% selectivity, and 1.9–4.7x faster than a zstd full
   scan.
 - **Small and standard.** Block bounds add 3.16% to an 8 bpv payload, and the arrays are
   ordinary Zarr v3 arrays with no side index.
@@ -147,42 +147,24 @@ again. A query refuses a zone map built for another codec, shape or chunk layout
 
 ## Results
 
-From the experiments in [`experiments/`](experiments). Query times come from an
-n2-standard-16 VM (us-central1-b) reading from Google Cloud Storage; accuracy and
-overhead are computed offline.
+From the experiments in [`experiments/`](experiments). Threshold, ablation and memory
+results come from a c4n-standard-16 VM (us-central1-b) reading from Google Cloud
+Storage; point queries and build cost from an earlier n2-standard-16 VM in the same zone;
+accuracy and overhead are computed offline. Each threshold comparison uses the fastest
+baseline configuration whose count is at least as accurate as SkipZFP's.
 
 | Experiment | Headline |
 |---|---|
-| Threshold query | 1.3–1.6x faster than the best baseline (t2m, 1–50%) |
+| Threshold query, 1–50% selectivity | 1.4–1.8x (ERA5 t2m), 1.3–1.9x (ERA5 ws), 1.6–2.1x (CMIP6 precipitation), 1.2–1.5x (Basilisk turbulence) faster than the best baseline |
+| Decoder | 3.5–3.7x libzfp's single-core decode-and-count throughput |
+| Memory | 3.3–6.6x less peak memory; every count query finishes under a 1 GB limit |
 | Point query | 140 KB per query; chunked and sharded Zarr read 0.8–19 MB |
 | Aggregates | error bounds never violated; sampling CIs miss up to 14% |
 | Filtered aggregates | guaranteed COUNT interval from metadata alone |
 | Overhead | 3.16% at 8 bpv |
 
-### Also on AWS
-
-The same data and scripts were rerun on an m5n.4xlarge VM (us-east-1), reading from
-Amazon S3 and from S3 Express One Zone, a lower-latency S3 storage class that keeps the
-data in a single availability zone; we put it in the same zone as the VM. Threshold
-query speedup over the best baseline on temperature (t2m):
-
-| Selectivity | 0.1% | 1% | 10% | 50% |
-|---|---|---|---|---|
-| S3, original query | 1.6x | 1.3x | 1.1x | 1.2x |
-| S3, optimized query | **2.4x** | **1.8x** | **1.4x** | **1.6x** |
-| S3 Express, original query | 1.3x | 1.2x | 1.1x | 1.2x |
-| S3 Express, optimized query | **2.1x** | **1.6x** | **1.5x** | **1.6x** |
-
-The original query is the one measured on Google Cloud above. The optimized query reads
-the zone map objects by key, plans and reads each one as soon as it arrives, and decodes
-each read in place instead of copying it; together these cut query time on S3 by
-16–35%. On wind speed (ws) it is 1.4–2.3x faster than the best baseline on both stores.
-
-Unlike the Google Cloud run, the baselines on AWS also read without copying each
-response, so these numbers are not directly comparable with the table above. Every
-version runs interleaved with the others, so they all see the same network. Aggregates,
-filtered aggregates and overhead give identical results on both clouds. Results are in
-[`experiments/results_aws/`](experiments/results_aws).
+Earlier runs on AWS, in [`experiments/results_aws/`](experiments/results_aws), predate
+a fix to the Zarr sharding baseline's read merging and are kept only for reference.
 
 ## Reproducing the paper
 
@@ -199,7 +181,12 @@ libzfp, downloads ERA5 from the public
 your bucket, and runs each experiment. Every step can be rerun and resumes where it
 stopped. Next to every results file, `<file>.runs.json` records each run's code version,
 machine, package versions and data, and every row carries its `run_id`;
-`summarize.py` turns the raw results into the tables. The published results used an n2-standard-16 VM in us-central1-b.
+`summarize.py` turns the raw results into the tables. The threshold, ablation, memory and
+concurrency results used a c4n-standard-16 VM (and a c4n-standard-8 for the 8-vCPU
+sweep) in us-central1-b; the other results used an n2-standard-16 VM there. Runs made
+from a working tree keep its diff against the recorded commit as
+`results/sources/<diff_sha256>.diff`. To rerun the threshold experiments as published,
+set `GAPS=1`, which adds Zarr sharding at four merge gaps and SkipZFP at a 1 MB gap.
 
 <details>
 <summary>Paper figure / table → script → result file</summary>
@@ -208,6 +195,8 @@ machine, package versions and data, and every row carries its `run_id`;
 |---|---|---|
 | Point query | `exp1_point_query.py` | `results/exp1_point_query.jsonl` |
 | Threshold query | `exp2_threshold_query.py` | `results/exp2_threshold_query.jsonl` |
+| Threshold query on Basilisk turbulence | `exp2_threshold_query.py --vars u` | `results/exp2_basilisk_u.jsonl` |
+| Threshold query on CMIP6 precipitation, with a ZFP baseline as accurate as SkipZFP | `exp2_threshold_query.py --vars pr --tight` | `results/exp2_cmip6_pr.jsonl`, `results/tight_pr.json` |
 | Aggregates | `exp3_aggregate.py` | `results/exp3_aggregate.json` |
 | Filtered aggregates | `exp4_filtered_aggregate.py` | `results/exp4_filtered_aggregate.json` |
 | Metadata overhead | `exp5_overhead.py` | `results/exp5_overhead.json` |
@@ -215,6 +204,7 @@ machine, package versions and data, and every row carries its `run_id`;
 | Ablation, one factor at a time | `ablation.py` | `results/ablation.jsonl` |
 | Memory under a cgroup limit | `memory_limit.py` | `results/memory_limit.jsonl` |
 | Build cost of the zone map | `build_cost.py` | `results/build_cost.jsonl` |
+| Concurrency and VM-size sweep | `exp2_threshold_query.py --concurrency-sweep` | `results/exp2_eu_conc_16vcpu.jsonl`, `results/exp2_eu_conc_8vcpu.jsonl` |
 | All tables from the raw results | `summarize.py` | `results/summary.md` |
 | Figures from the raw results | `figures.py` | `results/figures/` |
 | README figure | `readme_figure.py` | `.github/speedup-*.svg` |

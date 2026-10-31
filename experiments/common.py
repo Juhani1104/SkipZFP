@@ -17,19 +17,32 @@ from zarr.storage import WrapperStore
 
 from skipzfp import codec, query  # noqa: F401
 
-SHARD = (64, 128, 256)
+# the storage object: a SkipZFP chunk and a Zarr shard. SKIPZFP_OBJECT, such as
+# 64x320x640, builds and reads a suite with another object size instead
+SHARD = tuple(int(x) for x in os.environ.get("SKIPZFP_OBJECT", "64x128x256").split("x"))
 SUB_CHUNK = (64, 16, 32)
 GAP_BYTES = 850_000
 # SkipZFP threshold queries: 256 KB to 850 KB run equally fast on GCS, and the
 # smaller gap reads fewer bytes; 128 KB and below get slower (more requests)
 SKIPZFP_GAP_BYTES = 256_000
-CONCURRENCY = 128
+# requests in flight per query, the same for every method; SKIPZFP_CONCURRENCY sets
+# another value, as exp2's --concurrency-sweep does for each query process
+CONCURRENCY = int(os.environ.get("SKIPZFP_CONCURRENCY", "128"))
 EMPTY = np.iinfo(np.uint64).max
 VARS = ("t2m", "ws")
 # time steps handled at once by code that must not hold a whole variable in memory;
 # a multiple of every chunk and shard length along time. 4096 steps of 128 x 256
 # float32 is 537 MB, enough chunks to keep every core busy within one slab.
 SLAB = 64 * 64
+# and at most this many bytes, so a slab of a wider grid, such as the global ERA5's
+# 640 x 1280 (13 GB for 4096 steps), still fits in memory with its copies
+SLAB_BYTES = 1 << 30
+
+
+def slab_step(shape, itemsize=4, step=SLAB):
+    """step, cut to a multiple of 64 steps of at most SLAB_BYTES for this grid."""
+    per_step = int(np.prod(shape[1:])) * itemsize
+    return min(step, max(64, SLAB_BYTES // per_step // 64 * 64))
 
 
 def shape_of(tag):
@@ -47,9 +60,11 @@ def lossless():
 def skipzfp_codec(layout):
     """k8: sub-chunk 64x16x32 in C order; k8t: time-fastest block order.
 
-    A "-b4" suffix, as in k8t-b4, also stores a 4-bit error bound per block.
+    A "-b4" suffix, as in k8t-b4, also stores a 4-bit error bound per block. A
+    "-z" suffix, as in k8t-z, only compresses the zone map, so the codec is the
+    same as without it.
     """
-    base, _, bits = layout.partition("-b")
+    base, _, bits = layout.removesuffix("-z").partition("-b")
     order = (1, 2, 0) if base.endswith("t") else (0, 1, 2)
     return codec.SkipZFPCodec(
         rate=8.0,
@@ -81,6 +96,25 @@ def slabs(n, step=SLAB):
         yield s, min(s + step, n)
 
 
+def _copy(a, s, e, parts=16):
+    """np.array(a[s:e]); a memory map is copied in parts on several threads at once.
+
+    Copying a memory map faults its pages in one read at a time, which a network disk
+    serves at a few tens of MB/s; reads issued together run many times faster.
+    """
+    if not isinstance(a, np.memmap) or e - s < parts:
+        return np.array(a[s:e])
+    out = np.empty((e - s, *a.shape[1:]), a.dtype)
+    cuts = np.linspace(s, e, parts + 1).astype(int)
+
+    def one(i):
+        out[cuts[i] - s : cuts[i + 1] - s] = a[cuts[i] : cuts[i + 1]]
+
+    with ThreadPoolExecutor(parts) as ex:
+        list(ex.map(one, range(parts)))
+    return out
+
+
 def read_slabs(a, step=SLAB, read=None):
     """Yield (start, stop, values) for each time slab of a, in memory.
 
@@ -89,7 +123,9 @@ def read_slabs(a, step=SLAB, read=None):
     a[start:stop], which is what pulls a memory map from disk; with a custom read, a
     can be just the number of steps.
     """
-    read = read or (lambda s, e: np.array(a[s:e]))
+    read = read or (lambda s, e: _copy(a, s, e))
+    if hasattr(a, "shape"):
+        step = slab_step(a.shape, a.dtype.itemsize, step)
     spans = list(slabs(a.shape[0] if hasattr(a, "shape") else a, step))
     with ThreadPoolExecutor(1) as ex:
         nxt = ex.submit(read, *spans[0]) if spans else None
@@ -111,21 +147,24 @@ def _era5_slab(g, var, s, e):
 def load_era5(path, var, nt=None, cache=None):
     """Load one variable, trimmed to whole 64-step objects; ws is derived if needed.
 
-    With cache, the variable is copied slab by slab to <cache>/<var>.npy and returned
-    as a read-only memory map, so it never has to fit in memory. An existing copy is
-    reused.
+    Works on any raw group whose variables are (time, lat, lon) arrays, such as the
+    CMIP6 precipitation of fetch_cmip6.py. With cache, the variable is copied slab by
+    slab to <cache>/<var>.npy and returned as a read-only memory map, so it never has
+    to fit in memory. An existing copy is reused.
     """
     g = zarr.open_group(str(path), mode="r")
-    n = g["t2m"].shape[0]
+    ref = g[var] if var in g else g["u10"]
+    n = ref.shape[0]
     n = (min(n, nt) if nt else n) // 64 * 64
     if cache is None:
         return _era5_slab(g, var, 0, n)
     out = Path(cache, f"{var}.npy")
     if not out.exists():
         part = out.with_suffix(".part.npy")
-        shape = (n, *g["t2m"].shape[1:])
+        shape = (n, *ref.shape[1:])
         mm = np.lib.format.open_memmap(part, mode="w+", dtype=np.float32, shape=shape)
-        for s, e, x in read_slabs(n, read=lambda s, e: _era5_slab(g, var, s, e)):
+        step = slab_step(shape)
+        for s, e, x in read_slabs(n, step, read=lambda s, e: _era5_slab(g, var, s, e)):
             mm[s:e] = x
         mm.flush()
         del mm
@@ -478,8 +517,12 @@ def data_version(raw):
             h.update(np.asarray(a[:]).tobytes())
         else:
             h.update(np.asarray(a[0]).tobytes() + np.asarray(a[-1]).tobytes())
-    t = np.asarray(g["time"][[0, -1]]).astype("datetime64[h]")
-    out["time_range"] = [str(t[0]), str(t[1])]
+    t = np.asarray(g["time"][[0, -1]])
+    if g.attrs.get("time_unit") == "hours since 1970-01-01":  # ERA5
+        t = t.astype("datetime64[h]")
+        out["time_range"] = [str(t[0]), str(t[1])]
+    else:  # a model calendar or simulation steps, kept in their own units
+        out["time_range"] = [float(t[0]), float(t[1])]
     out["fingerprint_sha256"] = h.hexdigest()
     return out
 

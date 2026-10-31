@@ -563,6 +563,47 @@ META_SOURCE_ATTR = "skipzfp_meta_source"
 # units along the first axis in each zone map object, so a query can compute the
 # object keys and sizes without opening the zone map's zarr.json
 META_T_CHUNK_ATTR = "skipzfp_meta_t_chunk"
+# the largest zone map object write_meta makes by default, unless one unit is larger
+META_OBJECT_BYTES = 2_000_000
+# how the zone map objects are packed: absent or None for raw records, or
+# "planar-zstd" for pack_meta's layout compressed with zstd
+META_PACKING_ATTR = "skipzfp_meta_packing"
+PLANAR_ZSTD = "planar-zstd"
+
+
+def pack_meta(rec: np.ndarray, lead: int, blocks: int) -> np.ndarray:
+    """Rearrange zone map records so they compress well, as one byte string.
+
+    rec holds one record per row, lead bytes of float32 bounds first, then
+    each block's quantized min and max, then any error codes. The output puts
+    every record's leading bytes first, then every record's block minima as
+    differences from the previous block, then every block's width, max minus
+    min, and last the error codes. Neighboring blocks have similar minima and
+    widths, so these bytes repeat far more than the interleaved min and max.
+    All arithmetic is modulo 256, so unpack_meta restores rec exactly.
+    """
+    q = rec[:, lead : lead + 2 * blocks].reshape(len(rec), blocks, 2)
+    qmin = q[..., 0].copy()
+    dmin = qmin.copy()
+    dmin[:, 1:] -= qmin[:, :-1]
+    width = q[..., 1] - qmin
+    parts = (rec[:, :lead], dmin, width, rec[:, lead + 2 * blocks :])
+    return np.concatenate([p.reshape(-1) for p in parts])
+
+
+def unpack_meta(buf: np.ndarray, size: int, lead: int, blocks: int) -> np.ndarray:
+    """Undo pack_meta, returning the records as rows of size bytes."""
+    n = len(buf) // size
+    ends = np.cumsum([n * lead, n * blocks, n * blocks])
+    head, dmin, width, tail = np.split(buf, ends)
+    out = np.empty((n, size), np.uint8)
+    out[:, :lead] = head.reshape(n, lead)
+    qmin = np.cumsum(dmin.reshape(n, blocks), axis=1, dtype=np.uint8)
+    q = out[:, lead : lead + 2 * blocks].reshape(n, blocks, 2)
+    q[..., 0] = qmin
+    q[..., 1] = qmin + width.reshape(n, blocks)
+    out[:, lead + 2 * blocks :] = tail.reshape(n, -1)
+    return out
 
 
 def find_codec(arr: zarr.Array) -> SkipZFPCodec:
@@ -583,7 +624,8 @@ def write_meta(
     data: np.ndarray,
     *,
     path: str | None = None,
-    t_chunk: int = 16,
+    t_chunk: int | None = None,
+    compress: bool = False,
     threads: int = 32,
 ) -> zarr.Array:
     """Build the zone map that queries use to skip blocks.
@@ -607,6 +649,12 @@ def write_meta(
         data: The original values written to arr.
         path: Where to save the zone map. Defaults to "<arr.path>_meta".
         t_chunk: Units along the first axis in each chunk of the zone map.
+            Defaults to as many as fit in META_OBJECT_BYTES, at most 16 and
+            at least one, so the zone map is read in parallel as many
+            objects of at most about 2 MB, whatever the size of the grid.
+        compress: Store each object rearranged by pack_meta and compressed
+            with zstd, which queries undo after reading it. The returned
+            array then holds the rearranged bytes.
         threads: Threads used to compute the zone map.
 
     Returns:
@@ -633,6 +681,9 @@ def write_meta(
     size = meta_size(codec, unit)
     rank = block_rank(unit, codec.block_order, codec.block_dim)
     path = path or f"{arr.path}_meta"
+    if t_chunk is None:
+        per_unit = int(np.prod(grid[1:])) * size
+        t_chunk = max(1, min(16, META_OBJECT_BYTES // per_unit))
     t_chunk = min(t_chunk, grid[0])
 
     # The key encoding is spelled out because queries build the object keys
@@ -644,7 +695,7 @@ def write_meta(
         shape=(*grid, size),
         chunks=(t_chunk, *grid[1:], size),
         dtype="uint8",
-        compressors=None,
+        compressors=zarr.codecs.ZstdCodec(level=3) if compress else None,
         filters=None,
         chunk_key_encoding={"name": "default", "separator": "/"},
         config={"write_empty_chunks": True},
@@ -681,7 +732,16 @@ def write_meta(
     with ThreadPoolExecutor(threads) as ex:
         rows = list(ex.map(one, idxs))
 
-    meta[...] = np.stack(rows).reshape(*grid, size)
+    rec = np.stack(rows)
+    if compress:
+        # packed one object at a time, so each object unpacks on its own
+        lead = 8 + 4 * len(codec.layers)
+        blocks = len(rank)
+        step = t_chunk * int(np.prod(grid[1:]))
+        for i0 in range(0, len(rec), step):
+            part = rec[i0 : i0 + step]
+            part[...] = pack_meta(part, lead, blocks).reshape(part.shape)
+    meta[...] = rec.reshape(*grid, size)
     source = dict(
         codec=codec.to_dict(),
         shape=list(arr.shape),
@@ -689,7 +749,12 @@ def write_meta(
         chunk_crc32=chunk_crc32(arr),
     )
     arr.update_attributes(
-        {META_ATTR: path, META_T_CHUNK_ATTR: t_chunk, META_SOURCE_ATTR: source}
+        {
+            META_ATTR: path,
+            META_T_CHUNK_ATTR: t_chunk,
+            META_PACKING_ATTR: PLANAR_ZSTD if compress else None,
+            META_SOURCE_ATTR: source,
+        }
     )
     return meta
 
