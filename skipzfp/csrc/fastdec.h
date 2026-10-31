@@ -11,9 +11,11 @@ enum { SZFP_FAST_MAX_BYTES = 256 };
 /**
  * @brief Choose how blocks are decoded, mainly for tests and benchmarks.
  *
- * @param[in] mode 1 (default) uses the fast path, 0 sends every block through
- *                 libzfp, and 2 uses the fast path with the portable
- *                 (non-SIMD) bit-plane transpose.
+ * @param[in] mode 1 (default) uses the fast path with every speedup the CPU
+ *                 supports, 0 sends every block through libzfp, 2 uses the fast
+ *                 path with no SIMD at all, 3 with the SIMD bit-plane transpose
+ *                 only, 4 adds the SIMD inverse transform, and 5 also the BMI2
+ *                 bit-plane decoder; 1 adds to 5 counting in SIMD registers.
  */
 void szfp_set_fast_decode(int mode);
 
@@ -37,5 +39,20 @@ int szfp_fast_ok(int block_dim, double rate, size_t block_nbytes);
  * @param[out] out          Buffer that receives the 64 values.
  */
 void szfp_fast_decode(const unsigned char* src, size_t block_nbytes, float* out);
+
+/**
+ * @brief Return nonzero if szfp_fast_count() can be used, which needs AVX-512.
+ */
+int szfp_fast_count_ok(void);
+
+/**
+ * @brief Count the values lo < v <= hi of one block without storing them.
+ *
+ * The bounds are floats: for float values, v > lo for a double lo is the same as
+ * v > the largest float not above lo, and likewise for v <= hi, so callers round
+ * their double bounds down to float first. The caller must check
+ * szfp_fast_ok() and szfp_fast_count_ok() first.
+ */
+size_t szfp_fast_count(const unsigned char* src, size_t block_nbytes, float lo, float hi);
 
 #endif

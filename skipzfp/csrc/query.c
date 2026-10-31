@@ -22,6 +22,17 @@ static inline int in_range(float v, double lo, double hi) {
     return (d > lo) & (d <= hi); /* & rather than && keeps the loop branch-free */
 }
 
+/* the largest float not above d, so that for every float v, v > d exactly when
+ * v > float_at_most(d), and v <= d exactly when v <= float_at_most(d) */
+static float float_at_most(double d) {
+    float f = (float)d;
+
+    if ((double)f > d) {
+        f = nextafterf(f, -INFINITY);
+    }
+    return f;
+}
+
 /* count values with lo < v <= hi; an open upper end takes the same single
  * comparison as the x > T path, so it costs the same */
 static size_t count_in_range(const float* v, size_t n, double lo, double hi) {
@@ -812,7 +823,14 @@ int szfp_count_offsets_range(
         }
     }
 
-    if (szfp_fast_ok(block_dim, rate, block_nbytes)) {
+    if (szfp_fast_ok(block_dim, rate, block_nbytes) && szfp_fast_count_ok()) {
+        float lo_f = float_at_most(lo);
+        float hi_f = float_at_most(hi);
+
+        for (size_t i = 0; i < n; i++) {
+            count += szfp_fast_count(buf + offsets[i], block_nbytes, lo_f, hi_f);
+        }
+    } else if (szfp_fast_ok(block_dim, rate, block_nbytes)) {
         for (size_t i = 0; i < n; i++) {
             szfp_fast_decode(buf + offsets[i], block_nbytes, vals);
 
