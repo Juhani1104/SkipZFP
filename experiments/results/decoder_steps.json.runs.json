@@ -1,0 +1,48 @@
+{
+ "20261026T201244-log": {
+  "started": "2026-10-26T20:12:44Z",
+  "source": {
+   "commit": "e10ddfdc9535678960493053b4e18e5fb4dd9fb7",
+   "dirty": true,
+   "diff_sha256": "7e83aefb6d332cb790ba9a516839da75046e274fa3a3c195f3b61fcaf1e62132"
+  },
+  "machine": {
+   "host": "skipzfp-c4n",
+   "gce_machine_type": "c4n-standard-16",
+   "gce_zone": "us-central1-b",
+   "cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+   "cpus": 16,
+   "mem_kb": 61725028,
+   "kernel": "6.1.0-54-cloud-amd64"
+  },
+  "packages": {
+   "python": "3.11.2",
+   "numpy": "2.4.6",
+   "zarr": "3.1.6",
+   "obstore": "0.11.1",
+   "zfpy": "1.0.1",
+   "numcodecs": "0.16.5",
+   "skipzfp": "0.1.0",
+   "libzfp": "zfp version 1.0.1 (December 15, 2023)"
+  },
+  "data": {
+   "note": "the first 256 hours of 2000 for t2m and ws, cut from a global copy of ERA5 over the region of fetch_era5.py; decoder_steps.py on era5_2000.zarr reproduces these inputs byte for byte"
+  },
+  "script": "decoder_steps",
+  "note": "Measured by an earlier copy of decoder_steps.py with the same counting loop, in the same VM session as exp2_eu_conc_16vcpu (machine and packages are that session's); the values are parsed from its log, kept below.",
+  "log": [
+   "STEPS t2m: counts all equal True",
+   "STEPS   libzfp                               83 M values/s   0.45x of before today",
+   "STEPS   before today (SIMD transpose)       186 M values/s   1.00x of before today",
+   "STEPS   + SIMD inverse transform            200 M values/s   1.08x of before today",
+   "STEPS   + BMI2 bit planes                   245 M values/s   1.32x of before today",
+   "STEPS   + counting in SIMD registers        294 M values/s   1.58x of before today",
+   "STEPS ws: counts all equal True",
+   "STEPS   libzfp                               84 M values/s   0.42x of before today",
+   "STEPS   before today (SIMD transpose)       200 M values/s   1.00x of before today",
+   "STEPS   + SIMD inverse transform            222 M values/s   1.11x of before today",
+   "STEPS   + BMI2 bit planes                   279 M values/s   1.40x of before today",
+   "STEPS   + counting in SIMD registers        313 M values/s   1.57x of before today"
+  ]
+ }
+}

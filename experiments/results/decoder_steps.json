@@ -1,0 +1,23 @@
+{
+ "run_id": "20261026T201244-log",
+ "t2m": {
+  "counts_equal": true,
+  "mvalues_per_s": {
+   "libzfp": 83,
+   "previous (AVX-512 transpose)": 186,
+   "+ AVX-512 inverse transform": 200,
+   "+ BMI2 bit-plane parsing": 245,
+   "+ counting in registers": 294
+  }
+ },
+ "ws": {
+  "counts_equal": true,
+  "mvalues_per_s": {
+   "libzfp": 84,
+   "previous (AVX-512 transpose)": 200,
+   "+ AVX-512 inverse transform": 222,
+   "+ BMI2 bit-plane parsing": 279,
+   "+ counting in registers": 313
+  }
+ }
+}
