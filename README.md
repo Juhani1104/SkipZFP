@@ -185,8 +185,13 @@ machine, package versions and data, and every row carries its `run_id`;
 concurrency and decoder results used a c4n-standard-16 VM (and a c4n-standard-8 for the
 8-vCPU sweep) in us-central1-b; the other results used an n2-standard-16 VM there. Runs made
 from a working tree keep its diff against the recorded commit as
-`results/sources/<diff_sha256>.diff`. To rerun the threshold experiments as published,
-set `GAPS=1`, which adds Zarr sharding at four merge gaps and SkipZFP at a 1 MB gap.
+`results/sources/<diff_sha256>.diff`. For the paper, the threshold, ablation and memory
+results ran commit `e10ddfd` with diff `6a016101…`, which is the code of `b85e2ed`; the
+concurrency sweep and the decoder steps ran `e10ddfd` with diff `7e83aefb…`, the same
+library with older experiment scripts. The point query, build cost, aggregate, filtered
+aggregate, overhead and object-size results ran `7c0aa67`, an earlier version whose
+decoder has only the AVX-512 bit-plane transpose. To rerun the threshold experiments as
+published, set `GAPS=1`, which adds Zarr sharding at four merge gaps and SkipZFP at a 1 MB gap.
 
 <details>
 <summary>Paper figure / table → script → result file</summary>
@@ -234,7 +239,11 @@ experiments/    data download, experiments, results, cloud runner
 
 ## Citation
 
-A paper describing SkipZFP is in preparation.
+A paper on SkipZFP has been accepted at the 6th International Workshop on Big Data
+Reduction (IWBDR-6), held with the 2026 IEEE International Conference on Big Data. A
+BibTeX entry will be added once it is published.
+
+The tag `iwbdr6` marks the code as of the paper.
 
 ## License
 
