@@ -181,9 +181,9 @@ libzfp, downloads ERA5 from the public
 your bucket, and runs each experiment. Every step can be rerun and resumes where it
 stopped. Next to every results file, `<file>.runs.json` records each run's code version,
 machine, package versions and data, and every row carries its `run_id`;
-`summarize.py` turns the raw results into the tables. The threshold, ablation, memory and
-concurrency results used a c4n-standard-16 VM (and a c4n-standard-8 for the 8-vCPU
-sweep) in us-central1-b; the other results used an n2-standard-16 VM there. Runs made
+`summarize.py` turns the raw results into the tables. The threshold, ablation, memory,
+concurrency and decoder results used a c4n-standard-16 VM (and a c4n-standard-8 for the
+8-vCPU sweep) in us-central1-b; the other results used an n2-standard-16 VM there. Runs made
 from a working tree keep its diff against the recorded commit as
 `results/sources/<diff_sha256>.diff`. To rerun the threshold experiments as published,
 set `GAPS=1`, which adds Zarr sharding at four merge gaps and SkipZFP at a 1 MB gap.
@@ -204,6 +204,7 @@ set `GAPS=1`, which adds Zarr sharding at four merge gaps and SkipZFP at a 1 MB 
 | Ablation, one factor at a time | `ablation.py` | `results/ablation.jsonl` |
 | Memory under a cgroup limit | `memory_limit.py` | `results/memory_limit.jsonl` |
 | Build cost of the zone map | `build_cost.py` | `results/build_cost.jsonl` |
+| Decoder steps, one thread | `decoder_steps.py` | `results/decoder_steps.json` |
 | Concurrency and VM-size sweep | `exp2_threshold_query.py --concurrency-sweep` | `results/exp2_eu_conc_16vcpu.jsonl`, `results/exp2_eu_conc_8vcpu.jsonl` |
 | All tables from the raw results | `summarize.py` | `results/summary.md` |
 | Figures from the raw results | `figures.py` | `results/figures/` |

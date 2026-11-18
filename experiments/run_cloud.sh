@@ -5,7 +5,7 @@
 #   BUCKET=s3://your-bucket/skipzfp bash experiments/run_cloud.sh [step ...]
 #
 # Steps run in order: setup fetch prepare prepare_bits exp1 exp2 ablation memory build
-# sensitivity local fetch_pr prepare_pr exp2_pr fetch_bas prepare_bas exp2_bas summary.
+# decoder sensitivity local fetch_pr prepare_pr exp2_pr fetch_bas prepare_bas exp2_bas summary.
 # The *_pr and *_bas steps repeat exp2 on two other datasets, CMIP6 precipitation and
 # SDRBench Basilisk turbulence; on Basilisk, SkipZFP also runs with a compressed zone
 # map (layouts k8-z and k8t-z). prepare_z, not run by default, builds the same two
@@ -44,7 +44,7 @@ STEPS=("$@")
 GAP=(${GAPS:+--gap-sweep})
 from() { [ -n "${THRESHOLDS:-}" ] && echo "--thresholds-from $THRESHOLDS/$1"; }
 [ ${#STEPS[@]} -eq 0 ] && STEPS=(setup fetch prepare prepare_bits exp1 exp2 ablation
-    memory build sensitivity local fetch_pr prepare_pr exp2_pr fetch_bas prepare_bas
+    memory build decoder sensitivity local fetch_pr prepare_pr exp2_pr fetch_bas prepare_bas
     exp2_bas summary)
 mkdir -p "$DATA" "$OUT"
 
@@ -223,6 +223,12 @@ step_build() {
     cd "$EXP"
     "$PY" build_cost.py run "$TEN" "$OUT/build_cost.jsonl" --tmp "$DATA/build_tmp" \
         --reps "${BUILD_REPS:-2}" ${NT:+--nt "$NT"}
+}
+
+# single-thread speed of each decoder step, on this VM's CPU
+step_decoder() {
+    cd "$EXP"
+    "$PY" decoder_steps.py "$DATA/era5_2000.zarr" "$OUT/decoder_steps.json"
 }
 
 step_summary() {
