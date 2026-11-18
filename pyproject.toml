@@ -10,8 +10,9 @@ requires-python = ">=3.11"
 dependencies = ["numpy>=2", "zarr>=3.1"]
 
 [project.optional-dependencies]
-test = ["pytest", "zfpy"]
-experiments = ["zfpy", "numcodecs", "obstore", "matplotlib", "xarray", "dask", "gcsfs"]
+# zfpy 1.0.1.post0 breaks importing numcodecs (zarr-developers/numcodecs#892)
+test = ["pytest", "zfpy!=1.0.1.post0"]
+experiments = ["zfpy!=1.0.1.post0", "numcodecs", "obstore", "matplotlib", "xarray", "dask", "gcsfs"]
 
 [tool.setuptools]
 packages = ["skipzfp"]
