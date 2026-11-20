@@ -189,7 +189,8 @@ def test_limit_counts_reads_waiting_for_a_decoder(stored, pipeline, monkeypatch)
     """
     a, _, z = stored
     th = float(np.quantile(a, 0.9))
-    largest = peak(z, th, 1, pipeline=pipeline).peak_inflight_bytes
+    # adjacent blocks only, so that many small reads queue for the decoder
+    largest = peak(z, th, 1, pipeline=pipeline, merge_gap_blocks=0).peak_inflight_bytes
     nat = query.native()
     lock = threading.Lock()
     alive = [0, 0]  # bytes now held, most ever held
@@ -213,7 +214,7 @@ def test_limit_counts_reads_waiting_for_a_decoder(stored, pipeline, monkeypatch)
     monkeypatch.setattr(query, "read_one", tracked_read)
     monkeypatch.setattr(nat, "count_offsets", slow_count)
     limit = 4 * query.get_layout(z).block_size
-    r = peak(z, th, limit, pipeline=pipeline, threads=1)
+    r = peak(z, th, limit, pipeline=pipeline, threads=1, merge_gap_blocks=0)
     assert alive[0] == 0 and r.payload_requests > 8
     assert alive[1] <= max(limit, largest)
 
@@ -278,3 +279,33 @@ def test_trace_covers_every_read(stored, pipeline):
     for issued, arrived, decoded in r.trace["reads"]:
         assert 0 <= issued <= arrived <= decoded <= r.total_seconds
     assert query.query_gt(z, th).trace is None
+
+
+@pytest.mark.real_default_gap
+def test_default_merge_gap_is_256_kb_at_the_rate_read():
+    assert QueryOptions().merge_gap_blocks is None
+    assert query.gap_blocks(QueryOptions(), 64) == 4000
+    assert query.gap_blocks(QueryOptions(), 32) == 8000
+    assert query.gap_blocks(QueryOptions(merge_gap_blocks=0), 64) == 0
+    assert query.gap_blocks(QueryOptions(merge_gap_blocks=7), 64) == 7
+
+
+@pytest.mark.real_default_gap
+@pytest.mark.parametrize("pipeline", (True, False))
+def test_default_merge_gap_matches_the_explicit_one(stored, pipeline):
+    a, _, z = stored
+    th = float(np.quantile(a, 0.5))
+    gap = query.DEFAULT_MERGE_GAP_BYTES // query.get_layout(z).block_size
+
+    def run(**kw):
+        return query.query_gt(z, th, options=QueryOptions(pipeline=pipeline, **kw))
+
+    default, explicit, adjacent = (
+        run(),
+        run(merge_gap_blocks=gap),
+        run(merge_gap_blocks=0),
+    )
+    assert default.count == explicit.count == adjacent.count
+    assert default.payload_requests == explicit.payload_requests
+    assert default.payload_bytes_read == explicit.payload_bytes_read
+    assert default.payload_requests < adjacent.payload_requests

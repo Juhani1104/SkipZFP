@@ -77,10 +77,10 @@ z[:] = data
 # per-block bounds, stored next to the array
 write_meta(z, data)
 
-# count(x > 295), reading only the blocks that can match
+# count(x > 295), decoding only the blocks that can match
 r = query_gt(z, 295.0)
 print(r.count, r.bytes_read, r.maybe_blocks, r.total_blocks)
-# 630563 588800 5056 131072
+# 630563 4954880 5056 131072
 
 # count(290 < x <= 295); query_lt counts x < T the same way query_gt counts x > T
 r = query_range(z, 290.0, 295.0)
@@ -115,8 +115,9 @@ suit most queries.
    reconstruction error, so the bounds hold for both the original and the decoded
    values.
 3. **Three-valued planning.** A block is OUT (skip), IN (every value matches; count it
-   from metadata) or MAYBE (read and decode). Nearby MAYBE blocks are merged into one
-   request, and decoding runs in C while later requests are still downloading.
+   from metadata) or MAYBE (read and decode). MAYBE blocks up to 256 KB apart are
+   merged into one request by default, and decoding runs in C while later requests are
+   still downloading.
 4. **Layout knobs.** `sub_chunk` packs several small units into one object for fewer
    requests; `block_order=(1, 2, 0)` stores each block column along time contiguously,
    which makes a point time series one range read; `layers` stores bit-plane prefixes so

@@ -424,6 +424,13 @@ def native() -> _Native:
     return _NATIVE
 
 
+# Unneeded bytes a read may span to join its neighbor when merge_gap_blocks is
+# None. On Google Cloud Storage, merging adjacent blocks only was up to 49x
+# slower than this gap and a 64 KB gap up to 2.2x slower, while gaps of 850 KB
+# and 1 MB changed query time by at most about 20%.
+DEFAULT_MERGE_GAP_BYTES = 256_000
+
+
 @dataclass(frozen=True)
 class QueryOptions:
     """Tuning knobs shared by query_gt, query_lt and query_range.
@@ -437,7 +444,9 @@ class QueryOptions:
             4 * request_concurrency by default.
         merge_gap_blocks: Merge two reads in the same chunk when at most this
             many unneeded blocks lie between them, so larger values mean fewer
-            requests but more bytes read.
+            requests but more bytes read. None, the default, allows
+            DEFAULT_MERGE_GAP_BYTES (256 KB) of them at the rate being read,
+            and 0 merges adjacent blocks only.
         layer: Precision layer to read for arrays written with layers, where 0
             is the lowest rate and None reads the full rate.
         max_chunk_requests: When layer > 0, a chunk that would need more than
@@ -465,14 +474,14 @@ class QueryOptions:
         ValueError: If a value is out of range.
 
     Example:
-        >>> opts = QueryOptions(merge_gap_blocks=4000)
+        >>> opts = QueryOptions(merge_gap_blocks=0)  # adjacent blocks only
         >>> query_gt("data/t2m.zarr", 295.0, options=opts)
     """
 
     threads: int = 0
     request_concurrency: int = 32
     request_batch_size: int | None = None
-    merge_gap_blocks: int = 0
+    merge_gap_blocks: int | None = None
     layer: int | None = None
     max_chunk_requests: int = 1
     pipeline: bool = True
@@ -488,7 +497,7 @@ class QueryOptions:
             raise ValueError("request_concurrency must be greater than 0")
         if self.request_batch_size is not None and self.request_batch_size <= 0:
             raise ValueError("request_batch_size must be greater than 0")
-        if self.merge_gap_blocks < 0:
+        if self.merge_gap_blocks is not None and self.merge_gap_blocks < 0:
             raise ValueError("merge_gap_blocks must be non-negative")
         if self.max_chunk_requests <= 0:
             raise ValueError("max_chunk_requests must be greater than 0")
@@ -1104,6 +1113,13 @@ async def stream_count(
     return sum(p[0] for p in parts), sum(p[1] for p in parts), sum(p[2] for p in parts)
 
 
+def gap_blocks(opts: QueryOptions, block_bytes: int) -> int:
+    """Merge gap of opts in blocks, for reads of block_bytes per block."""
+    if opts.merge_gap_blocks is not None:
+        return opts.merge_gap_blocks
+    return DEFAULT_MERGE_GAP_BYTES // block_bytes
+
+
 def merge_ranges(
     keys: Sequence[str],
     chunk_ids: np.ndarray,
@@ -1228,14 +1244,16 @@ async def _query_async(
 
     # 3. turn MAYBE blocks into byte-range reads. Each layer is stored as its
     # own contiguous section of the chunk, so every layer up to `layer` needs
-    # its own set of reads.
+    # its own set of reads. They share one gap in blocks, from the bytes a
+    # block takes over all of them.
+    gap = gap_blocks(opts, sum(lt.layer_bytes[: layer + 1]))
     per_layer = [
         merge_ranges(
             keys,
             chunk_ids,
             block_ids,
             lt.layer_bytes[j],
-            opts.merge_gap_blocks,
+            gap,
             lt.layer_starts[j],
         )
         for j in range(layer + 1)
@@ -1442,7 +1460,11 @@ async def _query_pipelined(
         )
         chunk_ids += np.uint32(u0 // subs[0] * chunks_per_step)
         merged, blocks = merge_ranges(
-            keys, chunk_ids, block_ids, lt.layer_bytes[0], opts.merge_gap_blocks
+            keys,
+            chunk_ids,
+            block_ids,
+            lt.layer_bytes[0],
+            gap_blocks(opts, lt.layer_bytes[0]),
         )
         if merged:
             first_read = min(first_read, time.perf_counter())

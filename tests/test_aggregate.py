@@ -92,10 +92,10 @@ def test_aggregate_reads_in_and_maybe_blocks_only(stored):
     a, _, z = stored
     th = float(np.quantile(a, 0.5))
     lt = query.get_layout(z)
-    r = aggregate_gt(z, th)
+    r = aggregate_gt(z, th, options=QueryOptions(merge_gap_blocks=0))
     assert r.in_blocks and r.out_blocks and r.maybe_blocks
     assert r.useful_payload_bytes == (r.in_blocks + r.maybe_blocks) * lt.block_size
-    assert r.payload_bytes_read == r.useful_payload_bytes  # no merging by default
+    assert r.payload_bytes_read == r.useful_payload_bytes  # adjacent blocks only
     assert r.payload_overread_bytes == 0
     assert r.metadata_bytes_read > 0 and r.payload_requests > 0
 
@@ -103,7 +103,7 @@ def test_aggregate_reads_in_and_maybe_blocks_only(stored):
 def test_aggregate_merged_reads_give_the_same_answer(stored):
     a, rec, z = stored
     th = float(np.quantile(a, 0.5))
-    plain = aggregate_gt(z, th)
+    plain = aggregate_gt(z, th, options=QueryOptions(merge_gap_blocks=0))
     merged = aggregate_gt(z, th, options=QueryOptions(merge_gap_blocks=10**6))
     assert merged.count == plain.count and merged.sum == pytest.approx(plain.sum)
     assert merged.original_count == plain.original_count
