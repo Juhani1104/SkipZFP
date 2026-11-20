@@ -29,6 +29,7 @@ from .query import (
     _Range,
     chunk_coords,
     full_key,
+    gap_blocks,
     get_layout,
     merge_ranges,
     meta_objects,
@@ -367,7 +368,11 @@ async def _read_listed(
     read, the number of reads, the bytes read and the decode seconds.
     """
     merged, blocks = merge_ranges(
-        keys, chunk_ids, block_ids, lt.layer_bytes[0], opts.merge_gap_blocks
+        keys,
+        chunk_ids,
+        block_ids,
+        lt.layer_bytes[0],
+        gap_blocks(opts, lt.layer_bytes[0]),
     )
     if len(blocks) and blocks is not block_ids:
         raise RuntimeError("the planner must list blocks in chunk order")
