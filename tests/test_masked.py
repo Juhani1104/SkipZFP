@@ -13,12 +13,13 @@ from skipzfp import (
     aggregate_lt,
     aggregate_range,
     codec,
+    query,
     query_gt,
     query_lt,
     query_range,
 )
 
-from helpers import SHAPE, check, smooth_field
+from helpers import SHAPE, check, smooth_field, true_blocks
 
 DATA_SHAPE = (128, 32, 64)  # 2 x 2 x 2 chunks of SHAPE
 CONFIGS = [
@@ -313,3 +314,87 @@ def test_aggregate_layer_0_matches_an_array_at_its_rate(tmp_path):
         res = aggregate_gt(z, t, options=QueryOptions(layer=0))
         assert res.count == np.count_nonzero(dec > t)
         assert res.sum == pytest.approx(dec[dec > t].astype(np.float64).sum())
+
+
+# -------------------------------------------------- kernels with random masks
+# The arrays above have the same mask at every step, so each block's mask
+# repeats one 16-bit pattern four times. These masks are random in all 64 bits.
+
+KERNEL_RATES = (2.0, 8.0, 12.0)
+MODES = {"fused": 1, "decode": 5, "no-simd": 2, "libzfp": 0}
+
+
+def kernel_blocks(rate, seed=0):
+    """Encoded blocks, their decoded values in block order, and random masks."""
+    a = smooth_field((8, 16, 32), seed)
+    a[:4, :4, :4] = 0.0  # an all-zero block, which the fused count handles apart
+    buf = codec.native().encode(a, rate, 4)
+    dec = true_blocks(codec.native().decode(buf, a.shape, rate, 4))
+    assert not buf[0] & 1  # block 0 is stored as an all-zero block
+    rng = np.random.default_rng(seed)
+    masks = rng.integers(0, 2**64, len(dec), dtype=np.uint64, endpoint=False)
+    # block 0 keeps its random mask; the next blocks get edge cases
+    special = [0, 2**64 - 1, 1, 2**63, 0xFFFF, 0xFFFF << 48, 0x1111111111111111]
+    masks[1 : 1 + len(special)] = np.array(special, dtype=np.uint64)
+    return buf, dec, masks
+
+
+def ranges(dec):
+    q = np.quantile(dec, (0.1, 0.5, 0.9))
+    return [(-np.inf, q[1]), (q[1], np.inf), (q[0], q[2]), (-1.0, 1.0)]
+
+
+def valid_bits(masks):
+    return ((masks[:, None] >> np.arange(64, dtype=np.uint64)) & np.uint64(1)).astype(
+        bool
+    )
+
+
+@pytest.fixture(params=list(MODES), ids=list(MODES))
+def mode(request):
+    lib = codec.native().lib
+    lib.szfp_set_fast_decode(MODES[request.param])
+    yield request.param
+    lib.szfp_set_fast_decode(1)
+
+
+@pytest.mark.parametrize("rate", KERNEL_RATES)
+def test_counts_follow_every_bit_of_the_mask(mode, rate):
+    buf, dec, masks = kernel_blocks(rate, seed=int(rate))
+    nat = query.native()
+    size = int(8 * rate)
+    offs = np.arange(len(dec), dtype=np.uint64) * size
+    ok = valid_bits(masks)
+    for lo, hi in ranges(dec):
+        want = int(((dec > lo) & (dec <= hi) & ok).sum())
+        got = nat.count_offsets(buf, offs, size, rate, 4, lo, hi, masks=masks)
+        assert got == want, (lo, hi)
+        got = nat.count(buf, len(dec), size, rate, 4, lo, 2, hi, masks)
+        assert got == want, (lo, hi)
+
+
+@pytest.mark.parametrize("rate", KERNEL_RATES)
+def test_aggregates_follow_every_bit_of_the_mask(mode, rate):
+    buf, dec, masks = kernel_blocks(rate, seed=10 + int(rate))
+    nat = query.native()
+    size = int(8 * rate)
+    offs = np.arange(len(dec), dtype=np.uint64) * size
+    ok = valid_bits(masks)
+    rng = np.random.default_rng(1)
+    eps = rng.uniform(0, 0.5, len(dec)).astype(np.float32)
+    in_block = (rng.random(len(dec)) < 0.3).astype(np.uint8)
+    r = dec.astype(np.float64)
+    e = eps.astype(np.float64)[:, None]
+    inb = in_block.astype(bool)[:, None]
+    for lo, hi in ranges(dec):
+        got = nat.aggregate_offsets(
+            buf, offs, eps, in_block, size, rate, 4, lo, hi, masks=masks
+        )
+        rec = ok & (inb | ((r > lo) & (r <= hi)))
+        sure = ok & (inb | ((r - e > lo) & (r + e <= hi)))
+        maybe = ok & ~sure & ~((r + e <= lo) | (r - e > hi))
+        assert got.rec_count == rec.sum()
+        assert got.rec_sum == pytest.approx(r[rec].sum(), rel=1e-12, abs=1e-9)
+        assert got.sure_count == sure.sum()
+        assert got.maybe_count == maybe.sum()
+        assert got.abs_total == pytest.approx((np.abs(r) + e)[ok].sum(), rel=1e-12)
