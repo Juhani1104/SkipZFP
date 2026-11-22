@@ -371,13 +371,16 @@ class _Native:
         hi: float,
         threads: int,
         eps: bool = False,
+        nvalid: np.ndarray | None = None,
     ) -> tuple[Any, ...]:
         """Classify blocks for lo < x <= hi and return the IN and MAYBE blocks.
 
         It returns the (chunk, block) ids of the listed blocks in chunk order,
         the state of each (1 = IN, 2 = MAYBE), and the IN and OUT counts. With
         eps=True it also returns each listed block's error bound as float32,
-        rounded up, last.
+        rounded up. With nvalid, as for plan_chunks, a block with no valid
+        value is OUT, and the number of valid values in the IN blocks comes
+        last.
         """
         src = np.ascontiguousarray(meta, dtype=np.uint8)
         cap = int(np.prod(unit_grid)) * blocks_per_unit
@@ -389,8 +392,10 @@ class _Native:
         n_read = ctypes.c_size_t()
         n_in = ctypes.c_size_t()
         n_out = ctypes.c_size_t()
+        in_values = ctypes.c_size_t()
+        nv = None if nvalid is None else np.ascontiguousarray(nvalid, dtype=np.uint8)
 
-        code = self.lib.szfp_plan_read_chunks(
+        code = self.lib.szfp_plan_read_chunks_masked(
             src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             meta_size,
             *unit_grid,
@@ -399,6 +404,7 @@ class _Native:
             lo,
             hi,
             threads,
+            None if nv is None else nv.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             chunk_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
             block_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
             states.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
@@ -407,6 +413,7 @@ class _Native:
             ctypes.byref(n_read),
             ctypes.byref(n_in),
             ctypes.byref(n_out),
+            ctypes.byref(in_values),
         )
         check(code, "szfp_plan_read_chunks")
 
@@ -418,7 +425,9 @@ class _Native:
             int(n_in.value),
             int(n_out.value),
         )
-        return (*out, bounds[:n]) if eps else out
+        if eps:
+            out = (*out, bounds[:n])
+        return out if nvalid is None else (*out, int(in_values.value))
 
     def aggregate_offsets(
         self,
@@ -431,22 +440,27 @@ class _Native:
         block_dim: int,
         lo: float,
         hi: float,
+        masks: np.ndarray | None = None,
     ) -> _Aggregate:
         """Decode the blocks at the given byte offsets and aggregate lo < x <= hi.
 
         eps is each block's error bound and in_block marks the IN blocks. data
         is any contiguous bytes-like object, read in place without a copy.
+        With masks, one per offset as block_bits returns them, only the valid
+        values count.
         """
         src = np.frombuffer(data, dtype=np.uint8)
         offs = np.ascontiguousarray(offsets, dtype=np.uint64)
         e = np.ascontiguousarray(eps, dtype=np.float32)
         flag = np.ascontiguousarray(in_block, dtype=np.uint8)
         out = _Aggregate()
+        m = None if masks is None else np.ascontiguousarray(masks, dtype=np.uint64)
 
-        code = self.lib.szfp_aggregate_offsets_range(
+        code = self.lib.szfp_aggregate_offsets_range_masked(
             src.ctypes.data,
             src.size,
             offs.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
+            None if m is None else m.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
             e.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
             flag.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             len(offs),

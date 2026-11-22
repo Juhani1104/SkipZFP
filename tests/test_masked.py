@@ -6,9 +6,19 @@ import zarr
 from zarr.core.array_spec import ArrayConfig, ArraySpec
 from zarr.core.buffer import default_buffer_prototype
 
-from skipzfp import QueryOptions, SkipZFPCodec, codec, query_gt, query_lt, query_range
+from skipzfp import (
+    QueryOptions,
+    SkipZFPCodec,
+    aggregate_gt,
+    aggregate_lt,
+    aggregate_range,
+    codec,
+    query_gt,
+    query_lt,
+    query_range,
+)
 
-from helpers import SHAPE, smooth_field
+from helpers import SHAPE, check, smooth_field
 
 DATA_SHAPE = (128, 32, 64)  # 2 x 2 x 2 chunks of SHAPE
 CONFIGS = [
@@ -258,3 +268,48 @@ def test_record_of_a_unit_with_no_valid_value_is_all_zero():
     x = np.zeros(SHAPE, np.float32)
     rec = codec.native().meta(x, 8.0, 4, valid=np.zeros(SHAPE, bool))
     assert not rec.any()
+
+
+# ------------------------------------------------------------- aggregates
+
+AGG_CONFIGS = [c for c in CONFIGS if "layers" not in c]
+
+
+@pytest.fixture(scope="module", params=range(len(AGG_CONFIGS)), ids=lambda i: str(i))
+def agg_stored(request, tmp_path_factory):
+    a = masked_field(seed=5)
+    z = make_masked(tmp_path_factory.mktemp("a"), a, **AGG_CONFIGS[request.param])
+    return a, z[:], z
+
+
+@pytest.mark.parametrize("pipeline", (True, False))
+def test_aggregates_cover_the_valid_values_only(agg_stored, pipeline):
+    a, dec, z = agg_stored
+    opts = QueryOptions(pipeline=pipeline)
+    for t in thresholds(a):
+        check(aggregate_gt(z, t, options=opts), a, dec, t, np.inf)
+        below = float(np.nextafter(np.float32(t), np.float32(-np.inf)))
+        check(aggregate_lt(z, t, options=opts), a, dec, -np.inf, below)
+    lo, hi = (float(x) for x in np.nanquantile(a, (0.2, 0.7)))
+    check(aggregate_range(z, lo, hi, options=opts), a, dec, lo, hi)
+
+
+def test_aggregate_of_everything_is_the_valid_values(agg_stored):
+    a, dec, z = agg_stored
+    r = aggregate_gt(z, float(np.nanmin(a)) - 1)
+    ok = ~np.isnan(a)
+    assert r.count == np.count_nonzero(ok)
+    assert r.original_count == (r.count, r.count)
+    assert r.sum == pytest.approx(dec[ok].astype(np.float64).sum(), rel=1e-12)
+
+
+def test_aggregate_layer_0_matches_an_array_at_its_rate(tmp_path):
+    a = masked_field(seed=6)
+    z = make_masked(tmp_path / "l", a, rate=8.0, layers=(2.0, 8.0))
+    low = create(tmp_path / "r", a, rate=2.0)
+    low[:] = a
+    dec = low[:]
+    for t in thresholds(a)[1:-1]:
+        res = aggregate_gt(z, t, options=QueryOptions(layer=0))
+        assert res.count == np.count_nonzero(dec > t)
+        assert res.sum == pytest.approx(dec[dec > t].astype(np.float64).sum())

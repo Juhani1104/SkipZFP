@@ -3,6 +3,7 @@
 import ctypes
 
 import numpy as np
+import pytest
 import zarr
 from zarr.registry import register_codec
 
@@ -140,3 +141,26 @@ def block_eps(
     low = out.astype(np.float64) < bound
     out[low] = np.nextafter(out[low], np.float32(np.inf))
     return out
+
+
+def brute(a, rec, lo, hi):
+    """Exact aggregates of lo < x <= hi on the decoded and the original values."""
+    m = (rec > lo) & (rec <= hi)
+    o = (a > lo) & (a <= hi)
+    x = rec[m].astype(np.float64)
+    y = a[o].astype(np.float64)
+    return m.sum(), x.sum(), y.size, y.sum(), (y.mean() if y.size else None)
+
+
+def check(res, a, rec, lo, hi):
+    n, s, on, osum, omean = brute(a, rec, lo, hi)
+    assert res.count == n
+    assert res.sum == pytest.approx(s, rel=1e-12, abs=1e-9)
+    assert res.mean == (pytest.approx(s / n, rel=1e-12) if n else None)
+    assert res.original_count[0] <= on <= res.original_count[1]
+    assert res.original_sum[0] <= osum <= res.original_sum[1]
+    if res.original_mean is None:
+        assert on == 0
+    elif on:
+        assert res.original_mean[0] <= omean <= res.original_mean[1]
+    assert res.in_blocks + res.out_blocks + res.maybe_blocks == res.total_blocks

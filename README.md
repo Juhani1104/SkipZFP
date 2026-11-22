@@ -122,6 +122,10 @@ suit most queries.
    requests; `block_order=(1, 2, 0)` stores each block column along time contiguously,
    which makes a point time series one range read; `layers` stores bit-plane prefixes so
    a query can read only a lower-rate prefix.
+5. **Missing values.** With `masked=True`, an array may hold NaN, such as land in an
+   ocean field. Each NaN is stored as the mean of the valid values of its block, each
+   chunk ends with its (y, x) mask so reads return NaN there again, and queries skip
+   blocks with no valid value and count only valid values.
 
 ### What each result means
 
@@ -230,7 +234,9 @@ experiments/    data download, experiments, results, cloud runner
 ## Limitations
 
 - float32, 3D arrays only; the array shape must be a whole number of chunks.
-- NaN and infinite values are rejected (ZFP cannot encode them).
+- Infinite values are rejected, and NaN needs `masked=True`. Masked NaN must sit at
+  the same (y, x) positions at every step along axis 0, the time axis, and a masked
+  array must be written whole chunks along axis 0 at a time.
 - Queries count values in a range (`query_gt`, `query_lt`, `query_range`) or
   return their COUNT, SUM and AVG (`aggregate_gt`, `aggregate_lt`,
   `aggregate_range`), exact for the decoded values with bounds for the original
