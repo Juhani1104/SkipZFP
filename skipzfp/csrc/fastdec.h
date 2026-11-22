@@ -2,6 +2,7 @@
 #define SKIPZFP_FASTDEC_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* Specialized decoder for fixed-rate 3D float blocks (4x4x4), bit-exact with
  * zfp_decode_block_float_3 built with the default ZFP_ROUND_NEVER. */
@@ -55,5 +56,19 @@ int szfp_fast_count_ok(void);
  */
 size_t
 szfp_fast_count(const unsigned char* src, size_t block_nbytes, float lo, float hi);
+
+/**
+ * @brief szfp_fast_count() over the values whose bit is set in mask.
+ *
+ * Value x + 4y + 16z of the block, as szfp_fast_decode() stores it, is at bit
+ * x + 4y + 16z, so a mask of all ones counts every value.
+ */
+size_t szfp_fast_count_masked(
+    const unsigned char* src,
+    size_t block_nbytes,
+    float lo,
+    float hi,
+    uint64_t mask
+);
 
 #endif

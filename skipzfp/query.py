@@ -29,9 +29,11 @@ from .codec import (
     META_SOURCE_ATTR,
     META_T_CHUNK_ATTR,
     PLANAR_ZSTD,
+    block_rank,
     check_source,
     find_codec,
     meta_size,
+    read_plane,
     unpack_meta,
 )
 from .codec import native as codec_native
@@ -76,6 +78,15 @@ class _Native:
         ]
         self.lib.szfp_plan_range_chunks.restype = ctypes.c_int
 
+        plan_args = self.lib.szfp_plan_range_chunks.argtypes
+        self.lib.szfp_plan_range_chunks_masked.argtypes = [
+            *plan_args[:12],
+            ctypes.POINTER(ctypes.c_ubyte),
+            *plan_args[12:],
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.lib.szfp_plan_range_chunks_masked.restype = ctypes.c_int
+
         self.lib.szfp_count_range_blocks.argtypes = [
             ctypes.POINTER(ctypes.c_ubyte),
             ctypes.c_size_t,
@@ -88,6 +99,13 @@ class _Native:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         self.lib.szfp_count_range_blocks.restype = ctypes.c_int
+
+        self.lib.szfp_count_range_blocks_masked.argtypes = [
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.c_uint64),
+            *self.lib.szfp_count_range_blocks.argtypes[1:],
+        ]
+        self.lib.szfp_count_range_blocks_masked.restype = ctypes.c_int
 
         self.lib.szfp_merge_ranges.argtypes = [
             ctypes.POINTER(ctypes.c_uint32),
@@ -116,6 +134,14 @@ class _Native:
         ]
         self.lib.szfp_count_offsets_range.restype = ctypes.c_int
 
+        count_args = self.lib.szfp_count_offsets_range.argtypes
+        self.lib.szfp_count_offsets_range_masked.argtypes = [
+            *count_args[:3],
+            ctypes.POINTER(ctypes.c_uint64),
+            *count_args[3:],
+        ]
+        self.lib.szfp_count_offsets_range_masked.restype = ctypes.c_int
+
         self.lib.szfp_plan_read_chunks.argtypes = [
             ctypes.POINTER(ctypes.c_ubyte),
             *[ctypes.c_size_t] * 8,
@@ -133,6 +159,15 @@ class _Native:
         ]
         self.lib.szfp_plan_read_chunks.restype = ctypes.c_int
 
+        read_args = self.lib.szfp_plan_read_chunks.argtypes
+        self.lib.szfp_plan_read_chunks_masked.argtypes = [
+            *read_args[:12],
+            ctypes.POINTER(ctypes.c_ubyte),
+            *read_args[12:],
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        self.lib.szfp_plan_read_chunks_masked.restype = ctypes.c_int
+
         self.lib.szfp_aggregate_offsets_range.argtypes = [
             ctypes.c_void_p,
             ctypes.c_size_t,
@@ -149,6 +184,14 @@ class _Native:
         ]
         self.lib.szfp_aggregate_offsets_range.restype = ctypes.c_int
 
+        agg_args = self.lib.szfp_aggregate_offsets_range.argtypes
+        self.lib.szfp_aggregate_offsets_range_masked.argtypes = [
+            *agg_args[:3],
+            ctypes.POINTER(ctypes.c_uint64),
+            *agg_args[3:],
+        ]
+        self.lib.szfp_aggregate_offsets_range_masked.restype = ctypes.c_int
+
     def plan_chunks(
         self,
         meta: np.ndarray,
@@ -159,11 +202,15 @@ class _Native:
         th: float,
         threads: int,
         hi: float = math.inf,
-    ) -> tuple[np.ndarray, np.ndarray, int, int]:
+        nvalid: np.ndarray | None = None,
+    ) -> tuple[Any, ...]:
         """Classify blocks for th < x <= hi and return the MAYBE blocks in chunk order.
 
         It returns the (chunk, block) ids of the MAYBE blocks, plus the IN
         and OUT counts. hi comes last so callers written for x > th still work.
+        With nvalid, each block's number of valid values as in _Mask, a block
+        with none is OUT, and the number of valid values in the IN blocks is
+        returned last.
         """
         src = np.ascontiguousarray(meta, dtype=np.uint8)
         cap = int(np.prod(unit_grid)) * blocks_per_unit
@@ -173,8 +220,10 @@ class _Native:
         n_maybe = ctypes.c_size_t()
         n_in = ctypes.c_size_t()
         n_out = ctypes.c_size_t()
+        in_values = ctypes.c_size_t()
+        nv = None if nvalid is None else np.ascontiguousarray(nvalid, dtype=np.uint8)
 
-        code = self.lib.szfp_plan_range_chunks(
+        code = self.lib.szfp_plan_range_chunks_masked(
             src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             meta_size,
             *unit_grid,
@@ -183,17 +232,20 @@ class _Native:
             th,
             hi,
             threads,
+            None if nv is None else nv.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             chunk_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
             block_ids.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
             cap,
             ctypes.byref(n_maybe),
             ctypes.byref(n_in),
             ctypes.byref(n_out),
+            ctypes.byref(in_values),
         )
         check(code, "szfp_plan_range_chunks")
 
         n = int(n_maybe.value)
-        return chunk_ids[:n], block_ids[:n], int(n_in.value), int(n_out.value)
+        out = (chunk_ids[:n], block_ids[:n], int(n_in.value), int(n_out.value))
+        return out if nvalid is None else (*out, int(in_values.value))
 
     def count(
         self,
@@ -205,16 +257,23 @@ class _Native:
         th: float,
         threads: int,
         hi: float = math.inf,
+        masks: np.ndarray | None = None,
     ) -> int:
-        """Decode n_block packed blocks and count values with th < x <= hi."""
+        """Decode n_block packed blocks and count values with th < x <= hi.
+
+        With masks, one per block as block_bits returns them, only the valid
+        values count.
+        """
         if n_block == 0:
             return 0
 
         src = np.ascontiguousarray(blocks, dtype=np.uint8)
         out = ctypes.c_size_t()
+        m = None if masks is None else np.ascontiguousarray(masks, dtype=np.uint64)
 
-        code = self.lib.szfp_count_range_blocks(
+        code = self.lib.szfp_count_range_blocks_masked(
             src.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
+            None if m is None else m.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
             n_block,
             block_size,
             rate,
@@ -272,19 +331,24 @@ class _Native:
         block_dim: int,
         th: float,
         hi: float = math.inf,
+        masks: np.ndarray | None = None,
     ) -> int:
         """Decode the blocks at the given byte offsets and count th < x <= hi.
 
         data is any contiguous bytes-like object, read in place without a copy.
+        With masks, one per offset as block_bits returns them, only the valid
+        values count.
         """
         src = np.frombuffer(data, dtype=np.uint8)
         offs = np.ascontiguousarray(offsets, dtype=np.uint64)
         out = ctypes.c_size_t()
+        m = None if masks is None else np.ascontiguousarray(masks, dtype=np.uint64)
 
-        code = self.lib.szfp_count_offsets_range(
+        code = self.lib.szfp_count_offsets_range_masked(
             src.ctypes.data,
             src.size,
             offs.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
+            None if m is None else m.ctypes.data_as(ctypes.POINTER(ctypes.c_uint64)),
             len(offs),
             block_size,
             rate,
@@ -579,6 +643,70 @@ class QueryResult:
 
 
 @dataclass(frozen=True)
+class _Mask:
+    """Where the valid values of a masked array are, block by block.
+
+    Both arrays have shape (units along y, units along x, blocks per unit),
+    with the blocks of a unit in storage order. Every unit along the first
+    axis shares them, since the mask is the same at every step.
+    """
+
+    nvalid: np.ndarray  # uint8, the number of valid values of each block
+    bits: np.ndarray  # uint64, value x + 4y + 16z of a block at bit x + 4y + 16z
+
+
+def build_mask(
+    plane: np.ndarray,
+    unit: tuple[int, int, int],
+    unit_grid: tuple[int, int, int],
+    block_order: tuple[int, ...],
+) -> _Mask:
+    """Turn the (y, x) mask of valid values into per-block counts and bits."""
+    by, bx = plane.shape[0] // 4, plane.shape[1] // 4
+    # the 16 (y, x) positions of each block column, y-major, as bits 4y + x
+    cells = plane.reshape(by, 4, bx, 4).transpose(0, 2, 1, 3).reshape(by, bx, 16)
+    f16 = (cells.astype(np.uint64) << np.arange(16, dtype=np.uint64)).sum(axis=-1)
+    bits = f16.astype(np.uint64) * np.uint64(0x0001000100010001)  # every z step
+    nvalid = 4 * cells.sum(axis=-1)
+    b = tuple(u // 4 for u in unit)
+    gy, gx = unit_grid[1], unit_grid[2]
+    rank = block_rank(unit, block_order)
+
+    def per_unit(a: np.ndarray) -> np.ndarray:
+        a = a.reshape(gy, b[1], gx, b[2]).transpose(0, 2, 1, 3)
+        a = np.broadcast_to(a[:, :, None], (gy, gx, *b)).reshape(gy, gx, -1)
+        out = np.empty_like(a)
+        out[..., rank] = a  # C order to storage order
+        return out
+
+    return _Mask(
+        nvalid=np.ascontiguousarray(per_unit(nvalid).astype(np.uint8)),
+        bits=np.ascontiguousarray(per_unit(bits)),
+    )
+
+
+def block_bits(
+    lt: _Layout, chunk_ids: np.ndarray, block_ids: np.ndarray
+) -> np.ndarray | None:
+    """Return the 64-bit mask of valid values of each (chunk, block), or None."""
+    if lt.mask is None:
+        return None
+    g = lt.grid_shape
+    s = lt.unit_grid_per_chunk
+    c = chunk_ids.astype(np.int64)
+    sub, bid = np.divmod(block_ids.astype(np.int64), lt.blocks_per_unit)
+    iy = (c // g[2]) % g[1] * s[1] + (sub // s[2]) % s[1]
+    ix = c % g[2] * s[2] + sub % s[2]
+    return lt.mask.bits[iy, ix, bid]
+
+
+def need_mask(lt: _Layout) -> None:
+    """Raise ValueError for a masked array whose mask write_meta has not recorded."""
+    if lt.masked and lt.mask is None:
+        raise ValueError("the masked array has no recorded mask; run write_meta")
+
+
+@dataclass(frozen=True)
 class _Layout:
     """Shapes and byte sizes of a SkipZFP array, computed once per query."""
 
@@ -597,6 +725,8 @@ class _Layout:
     unit_shape: tuple[int, int, int]
     unit_grid: tuple[int, int, int]  # units along each axis of the array
     blocks_per_unit: int
+    masked: bool = False
+    mask: _Mask | None = None  # for masked arrays once write_meta has run
 
     @property
     def unit_grid_per_chunk(self) -> tuple[int, int, int]:
@@ -739,6 +869,8 @@ def get_layout(arr: zarr.Array) -> _Layout:
 
     unit = codec.unit(chunk_shape)
     blocks_per_unit = int(np.prod([u // block_dim for u in unit]))
+    unit_grid = tuple(g * (c // u) for g, c, u in zip(grid_shape, chunk_shape, unit))
+    plane = read_plane(arr) if codec.masked else None
 
     return _Layout(
         chunk_shape=chunk_shape,
@@ -756,8 +888,12 @@ def get_layout(arr: zarr.Array) -> _Layout:
             int(x) for x in np.cumsum((0, *codec.layer_bytes[:-1])) * blocks_per_chunk
         ),
         unit_shape=unit,
-        unit_grid=tuple(g * (c // u) for g, c, u in zip(grid_shape, chunk_shape, unit)),
+        unit_grid=unit_grid,
         blocks_per_unit=blocks_per_unit,
+        masked=codec.masked,
+        mask=None
+        if plane is None
+        else build_mask(plane, unit, unit_grid, codec.block_order),
     )
 
 
@@ -1068,6 +1204,7 @@ async def stream_count(
     copy: bool = False,
     trace: list[tuple[float, float, float]] | None = None,
     t0: float = 0.0,
+    masks: np.ndarray | None = None,
 ) -> tuple[int, int, float]:
     """Read each merged range and count lo < x <= hi as soon as it arrives.
 
@@ -1076,15 +1213,20 @@ async def stream_count(
     budget to share a limit on the bytes held between reading and decoding.
     copy=True copies each read before decoding, as earlier versions did. With
     trace, each read appends when it started, arrived and was decoded, in
-    seconds since t0.
+    seconds since t0. With masks, one per entry of blocks, only the valid
+    values count.
     """
     loop = asyncio.get_running_loop()
     sem = sem or asyncio.Semaphore(concurrency)
     budget = budget or ByteBudget()
 
-    def count(data: np.ndarray, offs: np.ndarray) -> tuple[int, float]:
+    def count(
+        data: np.ndarray, offs: np.ndarray, m: np.ndarray | None
+    ) -> tuple[int, float]:
         t0 = time.perf_counter()
-        n = native().count_offsets(data, offs, block_size, rate, block_dim, lo, hi)
+        n = native().count_offsets(
+            data, offs, block_size, rate, block_dim, lo, hi, masks=m
+        )
         return n, time.perf_counter() - t0
 
     async def one(req: _MergedRange) -> tuple[int, int, float]:
@@ -1099,8 +1241,9 @@ async def stream_count(
             rows = (
                 blocks[req.item_start : req.item_end].astype(np.int64) - req.first_block
             )
+            m = None if masks is None else masks[req.item_start : req.item_end]
             n, sec = await loop.run_in_executor(
-                pool(threads), count, data, (rows * block_size).astype(np.uint64)
+                pool(threads), count, data, (rows * block_size).astype(np.uint64), m
             )
             del data  # drop the buffer before giving its bytes back
         finally:
@@ -1187,6 +1330,7 @@ async def _query_async(
     t0 = time.perf_counter()
 
     lt = get_layout(arr)
+    need_mask(lt)
     layer = len(lt.layers) - 1 if opts.layer is None else opts.layer
     if not 0 <= layer < len(lt.layers):
         raise ValueError(f"layer must be in [0, {len(lt.layers) - 1}]")
@@ -1229,7 +1373,7 @@ async def _query_async(
     # the chosen layer's error bound, so the C planner sees a single-layer
     # record that is 4 bytes per extra layer shorter.
     t1 = time.perf_counter()
-    chunk_ids, block_ids, n_in, n_out = await asyncio.to_thread(
+    chunk_ids, block_ids, n_in, n_out, *in_values = await asyncio.to_thread(
         native().plan_chunks,
         plan_meta(meta, lt, layer),
         lt.meta_size - 4 * (len(lt.layers) - 1),
@@ -1239,8 +1383,11 @@ async def _query_async(
         lo,
         opts.threads,
         hi,
+        None if lt.mask is None else lt.mask.nvalid,
     )
     plan_sec = time.perf_counter() - t1
+    # every valid value of an IN block matches, so IN blocks are counted unread
+    in_count = in_values[0] if in_values else n_in * lt.values_per_block
 
     # 3. turn MAYBE blocks into byte-range reads. Each layer is stored as its
     # own contiguous section of the chunk, so every layer up to `layer` needs
@@ -1259,7 +1406,10 @@ async def _query_async(
         for j in range(layer + 1)
     ]
     sorted_blocks = per_layer[0][1]
-    sorted_chunks = chunk_ids[np.lexsort((block_ids, chunk_ids))] if layer > 0 else None
+    sorted_chunks = chunk_ids
+    if sorted_blocks is not block_ids:
+        sorted_chunks = chunk_ids[np.lexsort((block_ids, chunk_ids))]
+    sorted_masks = block_bits(lt, sorted_chunks, sorted_blocks)
     cols = np.cumsum((0, *lt.layer_bytes[: layer + 1]))
 
     # A chunk that would need many small reads is usually cheaper to fetch as
@@ -1298,6 +1448,7 @@ async def _query_async(
             copy=not opts.zero_copy,
             trace=trace["reads"] if trace else None,
             t0=t0,
+            masks=sorted_masks,
         )
         payload_read_sec = time.perf_counter() - t1
         n_payload_reqs = len(merged0)
@@ -1367,6 +1518,7 @@ async def _query_async(
             lo,
             opts.threads,
             hi,
+            sorted_masks,
         )
         decode_sec = time.perf_counter() - t1
         payload_bytes = sum(len(x) for x in payload_parts)
@@ -1374,8 +1526,7 @@ async def _query_async(
         peak = payload_bytes
 
     total_blocks = len(keys) * lt.blocks_per_chunk
-    # every value of an IN block matches, so IN blocks are counted unread
-    total_count = n_in * lt.values_per_block + n_maybe_val
+    total_count = in_count + n_maybe_val
     useful_bytes = len(sorted_blocks) * block_size
 
     return QueryResult(
@@ -1443,7 +1594,10 @@ async def _query_pipelined(
             lo,
             1,  # objects are planned in parallel, one thread each
             hi,
+            None if lt.mask is None else lt.mask.nvalid,
         )
+        if lt.mask is None:  # every value of an IN block matches
+            out = (*out, out[2] * lt.values_per_block)
         return (*out, time.perf_counter() - t1)
 
     async def one(i: int) -> tuple[int, ...]:
@@ -1455,7 +1609,7 @@ async def _query_pipelined(
             trace["meta"].append(arrived - t0)
         u0 = i * mo.t_chunk
         n_units = min(mo.t_chunk, lt.unit_grid[0] - u0)
-        chunk_ids, block_ids, n_in, n_out, sec = await asyncio.to_thread(
+        chunk_ids, block_ids, n_in, n_out, in_count, sec = await asyncio.to_thread(
             plan, data[: n_units * mo.rows], n_units
         )
         chunk_ids += np.uint32(u0 // subs[0] * chunks_per_step)
@@ -1466,6 +1620,8 @@ async def _query_pipelined(
             lt.layer_bytes[0],
             gap_blocks(opts, lt.layer_bytes[0]),
         )
+        if blocks is not block_ids:
+            chunk_ids = chunk_ids[np.lexsort((block_ids, chunk_ids))]
         if merged:
             first_read = min(first_read, time.perf_counter())
         n, nbytes, dec = await stream_count(
@@ -1484,21 +1640,22 @@ async def _query_pipelined(
             not opts.zero_copy,
             trace["reads"] if trace is not None else None,
             t0,
+            block_bits(lt, chunk_ids, blocks),
         )
-        return n_in, n_out, len(blocks), n, nbytes, len(merged), sec, dec
+        return n_in, n_out, in_count, len(blocks), n, nbytes, len(merged), sec, dec
 
     parts = np.array(
         await asyncio.gather(*(one(i) for i in range(mo.count))), dtype=np.float64
-    ).reshape(-1, 8)
-    n_in, n_out, n_maybe, n_maybe_val, payload_bytes, n_reqs = (
-        int(x) for x in parts[:, :6].sum(axis=0)
+    ).reshape(-1, 9)
+    n_in, n_out, in_count, n_maybe, n_maybe_val, payload_bytes, n_reqs = (
+        int(x) for x in parts[:, :7].sum(axis=0)
     )
-    plan_sec, decode_sec = (float(x) for x in parts[:, 6:].sum(axis=0))
+    plan_sec, decode_sec = (float(x) for x in parts[:, 7:].sum(axis=0))
     end = time.perf_counter()
     useful_bytes = n_maybe * lt.layer_bytes[0]
 
     return QueryResult(
-        count=n_in * lt.values_per_block + n_maybe_val,
+        count=in_count + n_maybe_val,
         in_blocks=n_in,
         out_blocks=n_out,
         maybe_blocks=n_maybe,

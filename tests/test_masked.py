@@ -6,7 +6,7 @@ import zarr
 from zarr.core.array_spec import ArrayConfig, ArraySpec
 from zarr.core.buffer import default_buffer_prototype
 
-from skipzfp import SkipZFPCodec, codec
+from skipzfp import QueryOptions, SkipZFPCodec, codec, query_gt, query_lt, query_range
 
 from helpers import SHAPE, smooth_field
 
@@ -147,3 +147,114 @@ def test_fill_uses_the_block_mean_and_ignores_how_the_array_is_cut():
     # filling one unit gives the same values as filling the whole array
     for sl in codec.unit_slices(a.shape, (32, 16, 32)):
         assert np.array_equal(codec.fill_nan(a[sl]), f[sl])
+
+
+# ---------------------------------------------------------------- queries
+
+
+def make_masked(path, a, **kw):
+    """Write a to a masked array and build its zone map."""
+    z = create(path, a, **kw)
+    z[:] = a
+    codec.write_meta(z, a)
+    return z
+
+
+def thresholds(a):
+    v = a[~np.isnan(a)]
+    return [float(v.min()) - 1, *np.quantile(v, (0.01, 0.5, 0.99)), float(v.max()) + 1]
+
+
+@pytest.fixture(scope="module", params=range(len(CONFIGS)), ids=lambda i: str(i))
+def stored(request, tmp_path_factory):
+    a = masked_field(seed=3)
+    z = make_masked(tmp_path_factory.mktemp("q"), a, **CONFIGS[request.param])
+    return a, z[:], z
+
+
+@pytest.mark.parametrize("pipeline", (True, False))
+@pytest.mark.parametrize("gap", (0, None))
+def test_counts_cover_the_valid_values_only(stored, pipeline, gap):
+    a, dec, z = stored
+    opts = QueryOptions(pipeline=pipeline, merge_gap_blocks=gap)
+    for t in thresholds(a):
+        assert query_gt(z, t, options=opts).count == np.count_nonzero(dec > t)
+        assert query_lt(z, t, options=opts).count == np.count_nonzero(dec < t)
+    lo, hi = np.nanquantile(a, (0.2, 0.7))
+    got = query_range(z, float(lo), float(hi), options=opts).count
+    assert got == np.count_nonzero((dec > lo) & (dec <= hi))
+
+
+def test_land_blocks_are_out_and_in_blocks_count_their_valid_values(stored):
+    a, _, z = stored
+    r = query_gt(z, float(np.nanmin(a)) - 1)
+    assert r.count == np.count_nonzero(~np.isnan(a))
+    assert r.maybe_blocks == 0
+    ok = ~np.isnan(a).reshape(32, 4, 8, 4, 16, 4).transpose(0, 2, 4, 1, 3, 5)
+    assert r.out_blocks == np.count_nonzero(~ok.reshape(32, 8, 16, 64).any(axis=-1))
+
+
+@pytest.mark.parametrize("mode", (1, 5, 0), ids=("fused", "decode", "libzfp"))
+def test_every_decoder_counts_the_same(stored, mode):
+    a, dec, z = stored
+    lib = codec.native().lib
+    lib.szfp_set_fast_decode(mode)
+    try:
+        for t in thresholds(a)[1:-1]:
+            for pipeline in (True, False):
+                opts = QueryOptions(pipeline=pipeline)
+                assert query_gt(z, t, options=opts).count == np.count_nonzero(dec > t)
+    finally:
+        lib.szfp_set_fast_decode(1)
+
+
+def test_layer_0_counts_like_an_array_at_its_rate(tmp_path):
+    a = masked_field(seed=4)
+    z = make_masked(tmp_path / "l", a, rate=8.0, layers=(2.0, 4.0, 8.0))
+    low = create(tmp_path / "r", a, rate=2.0)
+    low[:] = a
+    dec = low[:]
+    for t in thresholds(a):
+        got = query_gt(z, t, options=QueryOptions(layer=0)).count
+        assert got == np.count_nonzero(dec > t)
+
+
+def test_write_meta_wants_masked_arrays_for_nan(tmp_path):
+    a = masked_field()
+    g = zarr.open_group(str(tmp_path), mode="w")
+    z = g.create_array(
+        "data",
+        shape=a.shape,
+        chunks=SHAPE,
+        dtype="float32",
+        serializer=SkipZFPCodec(),
+        compressors=None,
+        filters=None,
+    )
+    z[:] = codec.fill_nan(a)
+    with pytest.raises(ValueError, match="masked=True"):
+        codec.write_meta(z, a)
+
+
+def test_write_meta_rejects_nan_that_moves(tmp_path):
+    a = masked_field()
+    z = create(tmp_path / "m", a)
+    z[:] = a
+    b = a.copy()
+    b[70, 3, 4] = np.nan
+    with pytest.raises(ValueError, match="differ between steps 0 and 70"):
+        codec.write_meta(z, b)
+
+
+def test_query_needs_the_recorded_mask(tmp_path):
+    a = masked_field()
+    z = create(tmp_path / "m", a)
+    z[:] = a
+    with pytest.raises(ValueError, match="run write_meta"):
+        query_gt(z, 280.0)
+
+
+def test_record_of_a_unit_with_no_valid_value_is_all_zero():
+    x = np.zeros(SHAPE, np.float32)
+    rec = codec.native().meta(x, 8.0, 4, valid=np.zeros(SHAPE, bool))
+    assert not rec.any()

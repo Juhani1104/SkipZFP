@@ -395,16 +395,30 @@ tail_avx512(const uint32_t* u, int emax, float* out) {
     }
 }
 
-/* tail_avx512 that counts lo < v <= hi instead of storing the values; the order
- * of the values does not matter for that, so they are not swapped back */
+/* tail_avx512 that counts lo < v <= hi among the values whose bit is set in
+ * mask, value x + 4y + 16z at bit x + 4y + 16z, instead of storing them. The
+ * values are not swapped back after the x pass, so v[x] holds the values y + 4z
+ * at lane y + 4z, and its lanes take every fourth bit of the mask from bit x. */
 __attribute__((target("avx512f"))) static size_t
-tail_count_avx512(const uint32_t* u, int emax, float lo_f, float hi_f) {
+tail_count_avx512(const uint32_t* u, int emax, float lo_f, float hi_f, uint64_t mask) {
     const __m512i nb = _mm512_set1_epi32((int)NBMASK);
     const __m512 lo = _mm512_set1_ps(lo_f);
     const __m512 hi = _mm512_set1_ps(hi_f);
     __m512i v[4];
     __m512 s = _mm512_set1_ps(ldexpf(1.0f, emax - 30));
+    __mmask16 keep[4] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
     size_t count = 0;
+
+    if (mask != UINT64_MAX) {
+        for (int x = 0; x < 4; x++) {
+            unsigned k = 0;
+
+            for (int lane = 0; lane < 16; lane++) {
+                k |= (unsigned)((mask >> (x + 4 * lane)) & 1u) << lane;
+            }
+            keep[x] = (__mmask16)k;
+        }
+    }
 
     for (int z = 0; z < 4; z++) {
         __m512i idx = _mm512_loadu_si512(INV + 16 * z);
@@ -418,10 +432,10 @@ tail_count_avx512(const uint32_t* u, int emax, float lo_f, float hi_f) {
     swap_values(&v[0], &v[1], &v[2], &v[3]);
     inv_lift_avx512(&v[0], &v[1], &v[2], &v[3]);
 
-    for (int z = 0; z < 4; z++) {
-        __m512 x = _mm512_mul_ps(s, _mm512_cvtepi32_ps(v[z]));
-        __mmask16 in = _mm512_cmp_ps_mask(x, lo, _CMP_GT_OQ) &
-                       _mm512_cmp_ps_mask(x, hi, _CMP_LE_OQ);
+    for (int x = 0; x < 4; x++) {
+        __m512 r = _mm512_mul_ps(s, _mm512_cvtepi32_ps(v[x]));
+        __mmask16 in = _mm512_cmp_ps_mask(r, lo, _CMP_GT_OQ) &
+                       _mm512_cmp_ps_mask(r, hi, _CMP_LE_OQ) & keep[x];
         count += (size_t)__builtin_popcount((unsigned)in);
     }
     return count;
@@ -505,6 +519,16 @@ void szfp_fast_decode(const unsigned char* src, size_t block_nbytes, float* out)
 
 size_t
 szfp_fast_count(const unsigned char* src, size_t block_nbytes, float lo, float hi) {
+    return szfp_fast_count_masked(src, block_nbytes, lo, hi, UINT64_MAX);
+}
+
+size_t szfp_fast_count_masked(
+    const unsigned char* src,
+    size_t block_nbytes,
+    float lo,
+    float hi,
+    uint64_t mask
+) {
 #ifdef SZFP_X86
     unsigned char buf[SZFP_FAST_MAX_BYTES + 8];
     uint64_t bit_planes[32];
@@ -516,18 +540,19 @@ szfp_fast_count(const unsigned char* src, size_t block_nbytes, float lo, float h
     memset(buf + block_nbytes, 0, 8);
 
     if (!(buf[0] & 1)) { /* an all-zero block */
-        return (0.0f > lo && 0.0f <= hi) ? 64 : 0;
+        return (0.0f > lo && 0.0f <= hi) ? (size_t)__builtin_popcountll(mask) : 0;
     }
 
     emax = (int)((peek(buf, 1)) & 0xff) - 127;
     np = planes(buf, 9, (uint32_t)(8 * block_nbytes) - 9, bit_planes);
     transpose(bit_planes, np, u);
-    return tail_count_avx512(u, emax, lo, hi);
+    return tail_count_avx512(u, emax, lo, hi, mask);
 #else
     (void)src;
     (void)block_nbytes;
     (void)lo;
     (void)hi;
+    (void)mask;
     return 0;
 #endif
 }

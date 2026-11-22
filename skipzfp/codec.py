@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import ctypes
 import itertools
 import zlib
@@ -72,6 +73,13 @@ class _Native:
             ctypes.c_size_t,
         ]
         self.lib.szfp_meta.restype = ctypes.c_int
+
+        self.lib.szfp_meta_masked.argtypes = [
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_ubyte),
+            *self.lib.szfp_meta.argtypes[1:],
+        ]
+        self.lib.szfp_meta_masked.restype = ctypes.c_int
 
     def layout(
         self,
@@ -164,15 +172,29 @@ class _Native:
         arr: np.ndarray,
         rate: float,
         block_dim: int,
+        valid: np.ndarray | None = None,
     ) -> np.ndarray:
-        """Compute the zone map record of arr at one rate, with one error bound."""
+        """Compute the zone map record of arr at one rate, with one error bound.
+
+        With valid, arr holds missing values filled in, and the record covers
+        only the values where valid is true.
+        """
         src = np.ascontiguousarray(arr, dtype=np.float32)
         shape = tuple(int(x) for x in src.shape)
         _, meta_size = self.layout(shape, rate, block_dim)
         out = np.empty(meta_size, dtype=np.uint8)
+        fn = self.lib.szfp_meta
+        args = []
+        if valid is not None:
+            fn = self.lib.szfp_meta_masked
+            ok = np.ascontiguousarray(valid, dtype=np.uint8)
+            if ok.shape != src.shape:
+                raise ValueError("valid must have the shape of arr")
+            args = [ok.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte))]
 
-        code = self.lib.szfp_meta(
+        code = fn(
             src.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            *args,
             shape[0],
             shape[1],
             shape[2],
@@ -598,16 +620,23 @@ def meta_size(codec: SkipZFPCodec, chunk: tuple[int, ...]) -> int:
 
 
 def block_error_codes(
-    data: np.ndarray, rec: np.ndarray, eps: float, block_dim: int = 4
+    data: np.ndarray,
+    rec: np.ndarray,
+    eps: float,
+    block_dim: int = 4,
+    valid: np.ndarray | None = None,
 ) -> np.ndarray:
     """Return the 4-bit error code of each block of a unit, in C order.
 
     Code q bounds the block's largest error |data - rec| by eps * q / 15. It is
     rounded up, and then checked with the very expression the query planner
-    uses, so the bound never falls short of the error.
+    uses, so the bound never falls short of the error. With valid, only the
+    errors of the valid values count.
     """
     b = tuple(s // block_dim for s in data.shape)
     err = np.abs(data.astype(np.float64) - rec.astype(np.float64))
+    if valid is not None:
+        err = np.where(valid, err, 0.0)
     err = err.reshape(b[0], block_dim, b[1], block_dim, b[2], block_dim)
     err = err.max(axis=(1, 3, 5)).reshape(-1)
     e = float(np.float32(eps))
@@ -649,6 +678,10 @@ META_OBJECT_BYTES = 2_000_000
 # how the zone map objects are packed: absent or None for raw records, or
 # "planar-zstd" for pack_meta's layout compressed with zstd
 META_PACKING_ATTR = "skipzfp_meta_packing"
+# for masked=True, the (y, x) mask of valid values: its shape and its bits
+# packed little-endian in C order, base64-encoded, so a query has it as soon as
+# it opens the array
+MASK_ATTR = "skipzfp_mask"
 PLANAR_ZSTD = "planar-zstd"
 
 
@@ -757,6 +790,17 @@ def write_meta(
             "the array must live inside a group so metadata can sit next to it"
         )
 
+    plane = None
+    if codec.masked:
+        if np.isinf(data).any():
+            raise ValueError("data must not hold infinite values")
+        plane = plane_mask(data)
+    elif not np.isfinite(data).all():
+        raise ValueError(
+            "data holds NaN or infinite values; NaN needs an array written with "
+            "masked=True"
+        )
+
     unit = codec.unit(chunk)
     grid = tuple(s // u for s, u in zip(arr.shape, unit))
     size = meta_size(codec, unit)
@@ -790,7 +834,11 @@ def write_meta(
     def one(idx: tuple[int, ...]) -> np.ndarray:
         sl = tuple(slice(i * u, (i + 1) * u) for i, u in zip(idx, unit))
         x = np.ascontiguousarray(data[sl], dtype=np.float32)
-        per = [native().meta(x, r, codec.block_dim) for r in codec.layers]
+        valid = None
+        if codec.masked:
+            valid = ~np.isnan(x)
+            x = fill_nan(x, codec.block_dim)
+        per = [native().meta(x, r, codec.block_dim, valid) for r in codec.layers]
         offs = per[-1][12:].reshape(-1, 2)
         ranked = np.empty_like(offs)
         ranked[rank] = offs
@@ -803,7 +851,7 @@ def write_meta(
                 codec.block_dim,
             )
             eps = float(np.frombuffer(per[-1][8:12].tobytes(), np.float32)[0])
-            q = block_error_codes(x, rec, eps, codec.block_dim)
+            q = block_error_codes(x, rec, eps, codec.block_dim, valid)
             codes = np.empty_like(q)
             codes[rank] = q
             parts.append(pack_codes(codes))
@@ -829,15 +877,30 @@ def write_meta(
         chunks=list(chunk),
         chunk_crc32=chunk_crc32(arr),
     )
-    arr.update_attributes(
-        {
-            META_ATTR: path,
-            META_T_CHUNK_ATTR: t_chunk,
-            META_PACKING_ATTR: PLANAR_ZSTD if compress else None,
-            META_SOURCE_ATTR: source,
-        }
-    )
+    attrs = {
+        META_ATTR: path,
+        META_T_CHUNK_ATTR: t_chunk,
+        META_PACKING_ATTR: PLANAR_ZSTD if compress else None,
+        META_SOURCE_ATTR: source,
+    }
+    if plane is not None:
+        bits = np.packbits(plane.reshape(-1), bitorder="little")
+        attrs[MASK_ATTR] = dict(
+            shape=list(plane.shape), bits=base64.b64encode(bits.tobytes()).decode()
+        )
+    arr.update_attributes(attrs)
     return meta
+
+
+def read_plane(arr: zarr.Array) -> np.ndarray | None:
+    """Return the (y, x) mask that write_meta recorded for a masked array, or None."""
+    rec = arr.attrs.get(MASK_ATTR)
+    if not rec:
+        return None
+    shape = tuple(int(x) for x in rec["shape"])
+    bits = np.frombuffer(base64.b64decode(rec["bits"]), np.uint8)
+    flat = np.unpackbits(bits, count=shape[0] * shape[1], bitorder="little")
+    return flat.astype(bool).reshape(shape)
 
 
 def chunk_crc32(arr: zarr.Array, concurrency: int = 16) -> list[int | None]:
