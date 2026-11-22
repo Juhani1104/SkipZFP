@@ -229,6 +229,15 @@ class SkipZFPCodec(ArrayBytesCodec):
             half a byte per block but lets queries classify each block with
             its own error instead of the largest one in its unit. Only
             single-layer arrays support 4.
+        masked: Allow NaN for missing values, such as land in an ocean field.
+            NaN must sit at the same (y, x) positions in every step along
+            axis 0, the time axis, so the mask is a 2D plane; data whose
+            missing values move over time, or with no time axis, is not
+            supported. Each NaN is stored as the mean of the valid values of
+            its ZFP block, and each chunk ends with its mask, one bit per (y,
+            x) position, so reads return NaN there again. Write whole chunks
+            along axis 0 at once: a chunk written in part is padded with the
+            fill value, which breaks the same-positions rule.
 
     Example:
         >>> group = zarr.open_group("demo.zarr", mode="w")
@@ -250,6 +259,7 @@ class SkipZFPCodec(ArrayBytesCodec):
     block_order: tuple[int, ...] = (0, 1, 2)
     sub_chunk: tuple[int, ...] = ()
     block_error_bits: int = 0
+    masked: bool = False
 
     def __post_init__(self) -> None:
         if self.rate <= 0:
@@ -282,6 +292,7 @@ class SkipZFPCodec(ArrayBytesCodec):
         if bits and len(layers) > 1:
             raise ValueError("block_error_bits needs a single layer")
         object.__setattr__(self, "block_error_bits", bits)
+        object.__setattr__(self, "masked", bool(self.masked))
 
     def unit(self, shape: tuple[int, ...]) -> tuple[int, ...]:
         """Return the shape of one unit in a chunk of the given shape."""
@@ -321,6 +332,7 @@ class SkipZFPCodec(ArrayBytesCodec):
             block_order=tuple(cfg.get("block_order") or (0, 1, 2)),
             sub_chunk=tuple(cfg.get("sub_chunk") or ()),
             block_error_bits=int(cfg.get("block_error_bits", 0)),
+            masked=bool(cfg.get("masked", False)),
         )
 
     def to_dict(self) -> dict[str, JSON]:
@@ -334,6 +346,7 @@ class SkipZFPCodec(ArrayBytesCodec):
                 "sub_chunk": list(self.sub_chunk),
                 # written only when used, so existing arrays keep their metadata
                 **({"block_error_bits": 4} if self.block_error_bits else {}),
+                **({"masked": True} if self.masked else {}),
             },
         }
 
@@ -393,7 +406,13 @@ class SkipZFPCodec(ArrayBytesCodec):
         del input_byte_length
 
         shape = self.chunk_shape(chunk_spec)
-        return native().layout(shape, self.rate, self.block_dim)[0]
+        return native().layout(shape, self.rate, self.block_dim)[0] + self.mask_bytes(
+            shape
+        )
+
+    def mask_bytes(self, shape: tuple[int, ...]) -> int:
+        """Bytes of the mask at the end of a chunk: one bit per (y, x), or 0."""
+        return (int(shape[1]) * int(shape[2]) + 7) // 8 if self.masked else 0
 
     async def _encode_single(
         self,
@@ -405,11 +424,18 @@ class SkipZFPCodec(ArrayBytesCodec):
             chunk_data.as_ndarray_like(),
             dtype=np.float32,
         ).reshape(shape)
-        if not np.isfinite(arr).all():
-            raise ValueError("SkipZFP cannot encode NaN or infinite values")
+        if not self.masked:
+            if not np.isfinite(arr).all():
+                raise ValueError("SkipZFP cannot encode NaN or infinite values")
+            out = await asyncio.to_thread(self.pack, arr)
+            return chunk_spec.prototype.buffer.from_array_like(out)
 
-        out = await asyncio.to_thread(self.pack, arr)
-        return chunk_spec.prototype.buffer.from_array_like(out)
+        if np.isinf(arr).any():
+            raise ValueError("SkipZFP cannot encode infinite values")
+        valid = plane_mask(arr)
+        out = await asyncio.to_thread(self.pack, fill_nan(arr, self.block_dim))
+        bits = np.packbits(valid.reshape(-1), bitorder="little")
+        return chunk_spec.prototype.buffer.from_array_like(np.concatenate([out, bits]))
 
     async def _decode_single(
         self,
@@ -422,7 +448,14 @@ class SkipZFPCodec(ArrayBytesCodec):
             dtype=np.uint8,
         ).reshape(-1)
 
-        out = await asyncio.to_thread(self.unpack, buf, shape)
+        if not self.masked:
+            out = await asyncio.to_thread(self.unpack, buf, shape)
+            return chunk_spec.prototype.nd_buffer.from_ndarray_like(out)
+
+        n = self.mask_bytes(shape)
+        out = await asyncio.to_thread(self.unpack, buf[:-n], shape)
+        valid = np.unpackbits(buf[-n:], count=shape[1] * shape[2], bitorder="little")
+        out[:, ~valid.astype(bool).reshape(shape[1:])] = np.nan
         return chunk_spec.prototype.nd_buffer.from_ndarray_like(out)
 
     def pack(self, arr: np.ndarray) -> np.ndarray:
@@ -476,6 +509,54 @@ class SkipZFPCodec(ArrayBytesCodec):
                 self.block_dim,
             )
         return out
+
+
+def plane_mask(arr: np.ndarray) -> np.ndarray:
+    """Return the 2D mask of valid (y, x) positions of a masked array.
+
+    Raises:
+        ValueError: If the NaN positions are not the same in every step along
+            axis 0.
+    """
+    nan = np.isnan(arr)
+    differ = (nan != nan[:1]).any(axis=(1, 2))
+    if differ.any():
+        t = int(np.argmax(differ))
+        raise ValueError(
+            f"NaN positions differ between steps 0 and {t} along axis 0; with "
+            "masked=True, NaN must sit at the same (y, x) positions in every step "
+            "along axis 0. Write whole chunks along axis 0 at once: a chunk "
+            "written in part is padded with the fill value, which breaks this"
+        )
+    return ~nan[0]
+
+
+def fill_nan(x: np.ndarray, block_dim: int = 4) -> np.ndarray:
+    """Replace each NaN by the mean of the valid values of its ZFP block.
+
+    A block with no valid value gets 0. ZFP compresses each block on its own,
+    so the fill decides only the error of the valid values of mixed blocks,
+    and a block mean keeps those blocks smooth. Each block is summed on its
+    own in float64, so a block gets the same fill whether it is filled as
+    part of a chunk or of one unit.
+    """
+    nan = np.isnan(x)
+    if not nan.any():
+        return x
+    d = block_dim
+    b = tuple(s // d for s in x.shape)
+
+    def blocks(a: np.ndarray) -> np.ndarray:
+        a = a.reshape(b[0], d, b[1], d, b[2], d).transpose(0, 2, 4, 1, 3, 5)
+        return np.ascontiguousarray(a).reshape(-1, d**3)
+
+    v, ok = blocks(x), ~blocks(nan)
+    n = ok.sum(axis=1)
+    total = np.where(ok, v, 0).astype(np.float64).sum(axis=1)
+    mean = np.where(n > 0, total / np.maximum(n, 1), 0.0).astype(np.float32)
+    out = np.where(ok, v, mean[:, None])
+    out = out.reshape(*b, d, d, d).transpose(0, 3, 1, 4, 2, 5)
+    return np.ascontiguousarray(out).reshape(x.shape)
 
 
 def unit_slices(
