@@ -125,6 +125,11 @@ jobs:
           pip install -r requirements.txt
           pip install -e .
 
+      - name: Rebuild the C library with coverage
+        run: |
+          pip install setuptools gcovr
+          SKIPZFP_COVERAGE=1 python setup.py -q build_ext --inplace --force --build-temp build/cov
+
       - name: Install Intel SDE
         # Intel's site needs a click-through, so the package comes from the
         # mirror that the setup-sde action uses, checked against Intel's SHA256
@@ -144,3 +149,17 @@ jobs:
         run: |
           sde/sde64 -spr -- python -m pytest -q -p no:cacheprovider \
             tests/test_masked.py tests/test_fastdec.py tests/test_range_native.py
+
+      - name: Collect C coverage
+        # the test job's runner may lack AVX-512, so this job reports the AVX-512
+        # code's coverage; Codecov merges both reports
+        run: |
+          gcovr --root . --filter skipzfp/csrc/ --object-directory build/cov \
+            --xml c-coverage.xml --print-summary
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: c-coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
