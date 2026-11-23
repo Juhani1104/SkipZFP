@@ -198,8 +198,11 @@ SzResult szfp_encode(
     return SZ_OK;
 }
 
-SzResult szfp_meta(
+/* szfp_meta, with valid marking the values to summarize (NULL for all); the
+ * whole chunk, missing values filled in, is still what gets compressed */
+static SzResult meta_impl(
     const float* chunk,
+    const unsigned char* valid,
     size_t nx,
     size_t ny,
     size_t nz,
@@ -282,7 +285,12 @@ SzResult szfp_meta(
                                 4 * bx + dx, 4 * by + dy, 4 * bz + dz, ny, nz
                             );
                             float v = chunk[idx];
-                            double err = fabs((double)v - (double)dec[idx]);
+                            double err;
+
+                            if (valid != NULL && !valid[idx]) {
+                                continue;
+                            }
+                            err = fabs((double)v - (double)dec[idx]);
 
                             if (v < bmin) {
                                 bmin = v;
@@ -315,6 +323,13 @@ SzResult szfp_meta(
 
     free(dec);
 
+    /* a unit with no valid value: any record will do, since a query reads its
+     * blocks as holding no value */
+    if (cmin > cmax) {
+        cmin = 0.0f;
+        cmax = 0.0f;
+    }
+
     eps = (float)max_err;
     if ((double)eps < max_err) {
         eps = nextafterf(eps, FLT_MAX);
@@ -333,11 +348,17 @@ SzResult szfp_meta(
         double scale = 255.0 / span;
 
         for (size_t block_id = 0; block_id < lt.nblk; block_id++) {
-            int min_off =
-                (int)floor(((double)block_mins[block_id] - (double)cmin) * scale);
+            int min_off;
+            int max_off;
 
-            int max_off =
-                (int)ceil(((double)block_maxs[block_id] - (double)cmin) * scale);
+            if (block_mins[block_id] > block_maxs[block_id]) { /* no valid value */
+                offs[block_id * 2u] = 0;
+                offs[block_id * 2u + 1u] = 0;
+                continue;
+            }
+            min_off = (int)floor(((double)block_mins[block_id] - (double)cmin) * scale);
+
+            max_off = (int)ceil(((double)block_maxs[block_id] - (double)cmin) * scale);
 
             offs[block_id * 2u] = to_u8(min_off);
             offs[block_id * 2u + 1u] = to_u8(max_off);
@@ -347,4 +368,33 @@ SzResult szfp_meta(
     free(block_mins);
     free(block_maxs);
     return SZ_OK;
+}
+SzResult szfp_meta(
+    const float* chunk,
+    size_t nx,
+    size_t ny,
+    size_t nz,
+    double rate,
+    int block_dim,
+    unsigned char* meta,
+    size_t meta_capacity
+) {
+    return meta_impl(chunk, NULL, nx, ny, nz, rate, block_dim, meta, meta_capacity);
+}
+
+SzResult szfp_meta_masked(
+    const float* chunk,
+    const unsigned char* valid,
+    size_t nx,
+    size_t ny,
+    size_t nz,
+    double rate,
+    int block_dim,
+    unsigned char* meta,
+    size_t meta_capacity
+) {
+    if (valid == NULL) {
+        return SZ_ERR_NULL;
+    }
+    return meta_impl(chunk, valid, nx, ny, nz, rate, block_dim, meta, meta_capacity);
 }

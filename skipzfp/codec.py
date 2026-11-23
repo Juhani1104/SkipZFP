@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import ctypes
 import itertools
 import zlib
@@ -72,6 +73,13 @@ class _Native:
             ctypes.c_size_t,
         ]
         self.lib.szfp_meta.restype = ctypes.c_int
+
+        self.lib.szfp_meta_masked.argtypes = [
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_ubyte),
+            *self.lib.szfp_meta.argtypes[1:],
+        ]
+        self.lib.szfp_meta_masked.restype = ctypes.c_int
 
     def layout(
         self,
@@ -164,15 +172,29 @@ class _Native:
         arr: np.ndarray,
         rate: float,
         block_dim: int,
+        valid: np.ndarray | None = None,
     ) -> np.ndarray:
-        """Compute the zone map record of arr at one rate, with one error bound."""
+        """Compute the zone map record of arr at one rate, with one error bound.
+
+        With valid, arr holds missing values filled in, and the record covers
+        only the values where valid is true.
+        """
         src = np.ascontiguousarray(arr, dtype=np.float32)
         shape = tuple(int(x) for x in src.shape)
         _, meta_size = self.layout(shape, rate, block_dim)
         out = np.empty(meta_size, dtype=np.uint8)
+        fn = self.lib.szfp_meta
+        args = []
+        if valid is not None:
+            fn = self.lib.szfp_meta_masked
+            ok = np.ascontiguousarray(valid, dtype=np.uint8)
+            if ok.shape != src.shape:
+                raise ValueError("valid must have the shape of arr")
+            args = [ok.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte))]
 
-        code = self.lib.szfp_meta(
+        code = fn(
             src.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            *args,
             shape[0],
             shape[1],
             shape[2],
@@ -229,6 +251,15 @@ class SkipZFPCodec(ArrayBytesCodec):
             half a byte per block but lets queries classify each block with
             its own error instead of the largest one in its unit. Only
             single-layer arrays support 4.
+        masked: Allow NaN for missing values, such as land in an ocean field.
+            NaN must sit at the same (y, x) positions in every step along
+            axis 0, the time axis, so the mask is a 2D plane; data whose
+            missing values move over time, or with no time axis, is not
+            supported. Each NaN is stored as the mean of the valid values of
+            its ZFP block, and each chunk ends with its mask, one bit per (y,
+            x) position, so reads return NaN there again. Write whole chunks
+            along axis 0 at once: a chunk written in part is padded with the
+            fill value, which breaks the same-positions rule.
 
     Example:
         >>> group = zarr.open_group("demo.zarr", mode="w")
@@ -250,6 +281,7 @@ class SkipZFPCodec(ArrayBytesCodec):
     block_order: tuple[int, ...] = (0, 1, 2)
     sub_chunk: tuple[int, ...] = ()
     block_error_bits: int = 0
+    masked: bool = False
 
     def __post_init__(self) -> None:
         if self.rate <= 0:
@@ -282,6 +314,7 @@ class SkipZFPCodec(ArrayBytesCodec):
         if bits and len(layers) > 1:
             raise ValueError("block_error_bits needs a single layer")
         object.__setattr__(self, "block_error_bits", bits)
+        object.__setattr__(self, "masked", bool(self.masked))
 
     def unit(self, shape: tuple[int, ...]) -> tuple[int, ...]:
         """Return the shape of one unit in a chunk of the given shape."""
@@ -321,6 +354,7 @@ class SkipZFPCodec(ArrayBytesCodec):
             block_order=tuple(cfg.get("block_order") or (0, 1, 2)),
             sub_chunk=tuple(cfg.get("sub_chunk") or ()),
             block_error_bits=int(cfg.get("block_error_bits", 0)),
+            masked=bool(cfg.get("masked", False)),
         )
 
     def to_dict(self) -> dict[str, JSON]:
@@ -334,6 +368,7 @@ class SkipZFPCodec(ArrayBytesCodec):
                 "sub_chunk": list(self.sub_chunk),
                 # written only when used, so existing arrays keep their metadata
                 **({"block_error_bits": 4} if self.block_error_bits else {}),
+                **({"masked": True} if self.masked else {}),
             },
         }
 
@@ -393,7 +428,13 @@ class SkipZFPCodec(ArrayBytesCodec):
         del input_byte_length
 
         shape = self.chunk_shape(chunk_spec)
-        return native().layout(shape, self.rate, self.block_dim)[0]
+        return native().layout(shape, self.rate, self.block_dim)[0] + self.mask_bytes(
+            shape
+        )
+
+    def mask_bytes(self, shape: tuple[int, ...]) -> int:
+        """Bytes of the mask at the end of a chunk: one bit per (y, x), or 0."""
+        return (int(shape[1]) * int(shape[2]) + 7) // 8 if self.masked else 0
 
     async def _encode_single(
         self,
@@ -405,11 +446,18 @@ class SkipZFPCodec(ArrayBytesCodec):
             chunk_data.as_ndarray_like(),
             dtype=np.float32,
         ).reshape(shape)
-        if not np.isfinite(arr).all():
-            raise ValueError("SkipZFP cannot encode NaN or infinite values")
+        if not self.masked:
+            if not np.isfinite(arr).all():
+                raise ValueError("SkipZFP cannot encode NaN or infinite values")
+            out = await asyncio.to_thread(self.pack, arr)
+            return chunk_spec.prototype.buffer.from_array_like(out)
 
-        out = await asyncio.to_thread(self.pack, arr)
-        return chunk_spec.prototype.buffer.from_array_like(out)
+        if np.isinf(arr).any():
+            raise ValueError("SkipZFP cannot encode infinite values")
+        valid = plane_mask(arr)
+        out = await asyncio.to_thread(self.pack, fill_nan(arr, self.block_dim))
+        bits = np.packbits(valid.reshape(-1), bitorder="little")
+        return chunk_spec.prototype.buffer.from_array_like(np.concatenate([out, bits]))
 
     async def _decode_single(
         self,
@@ -422,7 +470,14 @@ class SkipZFPCodec(ArrayBytesCodec):
             dtype=np.uint8,
         ).reshape(-1)
 
-        out = await asyncio.to_thread(self.unpack, buf, shape)
+        if not self.masked:
+            out = await asyncio.to_thread(self.unpack, buf, shape)
+            return chunk_spec.prototype.nd_buffer.from_ndarray_like(out)
+
+        n = self.mask_bytes(shape)
+        out = await asyncio.to_thread(self.unpack, buf[:-n], shape)
+        valid = np.unpackbits(buf[-n:], count=shape[1] * shape[2], bitorder="little")
+        out[:, ~valid.astype(bool).reshape(shape[1:])] = np.nan
         return chunk_spec.prototype.nd_buffer.from_ndarray_like(out)
 
     def pack(self, arr: np.ndarray) -> np.ndarray:
@@ -478,6 +533,54 @@ class SkipZFPCodec(ArrayBytesCodec):
         return out
 
 
+def plane_mask(arr: np.ndarray) -> np.ndarray:
+    """Return the 2D mask of valid (y, x) positions of a masked array.
+
+    Raises:
+        ValueError: If the NaN positions are not the same in every step along
+            axis 0.
+    """
+    nan = np.isnan(arr)
+    differ = (nan != nan[:1]).any(axis=(1, 2))
+    if differ.any():
+        t = int(np.argmax(differ))
+        raise ValueError(
+            f"NaN positions differ between steps 0 and {t} along axis 0; with "
+            "masked=True, NaN must sit at the same (y, x) positions in every step "
+            "along axis 0. Write whole chunks along axis 0 at once: a chunk "
+            "written in part is padded with the fill value, which breaks this"
+        )
+    return ~nan[0]
+
+
+def fill_nan(x: np.ndarray, block_dim: int = 4) -> np.ndarray:
+    """Replace each NaN by the mean of the valid values of its ZFP block.
+
+    A block with no valid value gets 0. ZFP compresses each block on its own,
+    so the fill decides only the error of the valid values of mixed blocks,
+    and a block mean keeps those blocks smooth. Each block is summed on its
+    own in float64, so a block gets the same fill whether it is filled as
+    part of a chunk or of one unit.
+    """
+    nan = np.isnan(x)
+    if not nan.any():
+        return x
+    d = block_dim
+    b = tuple(s // d for s in x.shape)
+
+    def blocks(a: np.ndarray) -> np.ndarray:
+        a = a.reshape(b[0], d, b[1], d, b[2], d).transpose(0, 2, 4, 1, 3, 5)
+        return np.ascontiguousarray(a).reshape(-1, d**3)
+
+    v, ok = blocks(x), ~blocks(nan)
+    n = ok.sum(axis=1)
+    total = np.where(ok, v, 0).astype(np.float64).sum(axis=1)
+    mean = np.where(n > 0, total / np.maximum(n, 1), 0.0).astype(np.float32)
+    out = np.where(ok, v, mean[:, None])
+    out = out.reshape(*b, d, d, d).transpose(0, 3, 1, 4, 2, 5)
+    return np.ascontiguousarray(out).reshape(x.shape)
+
+
 def unit_slices(
     shape: tuple[int, ...], unit: tuple[int, ...]
 ) -> list[tuple[slice, ...]]:
@@ -517,16 +620,23 @@ def meta_size(codec: SkipZFPCodec, chunk: tuple[int, ...]) -> int:
 
 
 def block_error_codes(
-    data: np.ndarray, rec: np.ndarray, eps: float, block_dim: int = 4
+    data: np.ndarray,
+    rec: np.ndarray,
+    eps: float,
+    block_dim: int = 4,
+    valid: np.ndarray | None = None,
 ) -> np.ndarray:
     """Return the 4-bit error code of each block of a unit, in C order.
 
     Code q bounds the block's largest error |data - rec| by eps * q / 15. It is
     rounded up, and then checked with the very expression the query planner
-    uses, so the bound never falls short of the error.
+    uses, so the bound never falls short of the error. With valid, only the
+    errors of the valid values count.
     """
     b = tuple(s // block_dim for s in data.shape)
     err = np.abs(data.astype(np.float64) - rec.astype(np.float64))
+    if valid is not None:
+        err = np.where(valid, err, 0.0)
     err = err.reshape(b[0], block_dim, b[1], block_dim, b[2], block_dim)
     err = err.max(axis=(1, 3, 5)).reshape(-1)
     e = float(np.float32(eps))
@@ -568,6 +678,10 @@ META_OBJECT_BYTES = 2_000_000
 # how the zone map objects are packed: absent or None for raw records, or
 # "planar-zstd" for pack_meta's layout compressed with zstd
 META_PACKING_ATTR = "skipzfp_meta_packing"
+# for masked=True, the (y, x) mask of valid values: its shape and its bits
+# packed little-endian in C order, base64-encoded, so a query has it as soon as
+# it opens the array
+MASK_ATTR = "skipzfp_mask"
 PLANAR_ZSTD = "planar-zstd"
 
 
@@ -676,6 +790,17 @@ def write_meta(
             "the array must live inside a group so metadata can sit next to it"
         )
 
+    plane = None
+    if codec.masked:
+        if np.isinf(data).any():
+            raise ValueError("data must not hold infinite values")
+        plane = plane_mask(data)
+    elif not np.isfinite(data).all():
+        raise ValueError(
+            "data holds NaN or infinite values; NaN needs an array written with "
+            "masked=True"
+        )
+
     unit = codec.unit(chunk)
     grid = tuple(s // u for s, u in zip(arr.shape, unit))
     size = meta_size(codec, unit)
@@ -709,7 +834,11 @@ def write_meta(
     def one(idx: tuple[int, ...]) -> np.ndarray:
         sl = tuple(slice(i * u, (i + 1) * u) for i, u in zip(idx, unit))
         x = np.ascontiguousarray(data[sl], dtype=np.float32)
-        per = [native().meta(x, r, codec.block_dim) for r in codec.layers]
+        valid = None
+        if codec.masked:
+            valid = ~np.isnan(x)
+            x = fill_nan(x, codec.block_dim)
+        per = [native().meta(x, r, codec.block_dim, valid) for r in codec.layers]
         offs = per[-1][12:].reshape(-1, 2)
         ranked = np.empty_like(offs)
         ranked[rank] = offs
@@ -722,7 +851,7 @@ def write_meta(
                 codec.block_dim,
             )
             eps = float(np.frombuffer(per[-1][8:12].tobytes(), np.float32)[0])
-            q = block_error_codes(x, rec, eps, codec.block_dim)
+            q = block_error_codes(x, rec, eps, codec.block_dim, valid)
             codes = np.empty_like(q)
             codes[rank] = q
             parts.append(pack_codes(codes))
@@ -748,15 +877,30 @@ def write_meta(
         chunks=list(chunk),
         chunk_crc32=chunk_crc32(arr),
     )
-    arr.update_attributes(
-        {
-            META_ATTR: path,
-            META_T_CHUNK_ATTR: t_chunk,
-            META_PACKING_ATTR: PLANAR_ZSTD if compress else None,
-            META_SOURCE_ATTR: source,
-        }
-    )
+    attrs = {
+        META_ATTR: path,
+        META_T_CHUNK_ATTR: t_chunk,
+        META_PACKING_ATTR: PLANAR_ZSTD if compress else None,
+        META_SOURCE_ATTR: source,
+    }
+    if plane is not None:
+        bits = np.packbits(plane.reshape(-1), bitorder="little")
+        attrs[MASK_ATTR] = dict(
+            shape=list(plane.shape), bits=base64.b64encode(bits.tobytes()).decode()
+        )
+    arr.update_attributes(attrs)
     return meta
+
+
+def read_plane(arr: zarr.Array) -> np.ndarray | None:
+    """Return the (y, x) mask that write_meta recorded for a masked array, or None."""
+    rec = arr.attrs.get(MASK_ATTR)
+    if not rec:
+        return None
+    shape = tuple(int(x) for x in rec["shape"])
+    bits = np.frombuffer(base64.b64decode(rec["bits"]), np.uint8)
+    flat = np.unpackbits(bits, count=shape[0] * shape[1], bitorder="little")
+    return flat.astype(bool).reshape(shape)
 
 
 def chunk_crc32(arr: zarr.Array, concurrency: int = 16) -> list[int | None]:

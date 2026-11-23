@@ -121,6 +121,32 @@ SzResult szfp_meta(
 );
 
 /**
+ * @brief szfp_meta for a chunk with missing values.
+ *
+ * chunk holds the values with every missing one filled in, as they are
+ * compressed. The min, max and error bound of the record, and of each block,
+ * cover only the values marked valid. A block with no valid value gets the
+ * offsets (0, 0), and a chunk with none gets a min, max and error bound of 0,
+ * so queries must take the valid counts from elsewhere.
+ *
+ * @param[in] valid Nonzero for each value of chunk that is valid, in C order.
+ *
+ * The other parameters and the return codes are those of szfp_meta(), plus
+ * SZ_ERR_NULL if valid is NULL.
+ */
+SzResult szfp_meta_masked(
+    const float* chunk,
+    const unsigned char* valid,
+    size_t nx,
+    size_t ny,
+    size_t nz,
+    double rate,
+    int block_dim,
+    unsigned char* meta,
+    size_t meta_capacity
+);
+
+/**
  * @brief Decompress a single fixed-rate ZFP block of 1 to 4 dimensions.
  *
  * @param[in]  block_bytes    Compressed bytes of the block.

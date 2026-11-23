@@ -94,6 +94,40 @@ int szfp_plan_range_chunks(
 );
 
 /**
+ * @brief szfp_plan_range_chunks() for an array with missing values.
+ *
+ * nvalid holds the number of valid values of each block, 0 to 64, indexed by
+ * the unit's position along the last two axes and the block's position in
+ * the unit: entry (iy * uz + iz) * blocks_per_unit + b. Every unit along the
+ * first axis shares it, since the missing values sit at the same positions in
+ * every step. A block with no valid value is OUT. out_in_values receives the
+ * number of valid values in the IN blocks, 64 per IN block when nvalid is
+ * NULL. Either may be NULL.
+ */
+int szfp_plan_range_chunks_masked(
+    const unsigned char* meta,
+    size_t meta_size,
+    size_t ux,
+    size_t uy,
+    size_t uz,
+    size_t sx,
+    size_t sy,
+    size_t sz,
+    size_t blocks_per_unit,
+    double lo,
+    double hi,
+    int threads,
+    const unsigned char* nvalid,
+    uint32_t* maybe_chunks,
+    uint32_t* maybe_blocks,
+    size_t maybe_cap,
+    size_t* out_maybe,
+    size_t* out_in,
+    size_t* out_out,
+    size_t* out_in_values
+);
+
+/**
  * @brief Decode packed blocks and count the values greater than threshold.
  *
  * @param[in]  blocks       The block_count blocks, stored back to back.
@@ -128,6 +162,25 @@ int szfp_count_gt_blocks(
  */
 int szfp_count_range_blocks(
     const unsigned char* blocks,
+    size_t block_count,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double lo,
+    double hi,
+    int threads,
+    size_t* out_count
+);
+
+/**
+ * @brief szfp_count_range_blocks() over the valid values only.
+ *
+ * masks holds one 64-bit mask per block, with value x + 4y + 16z of the
+ * block at bit x + 4y + 16z set when it is valid, or is NULL for all values.
+ */
+int szfp_count_range_blocks_masked(
+    const unsigned char* blocks,
+    const uint64_t* masks,
     size_t block_count,
     size_t block_nbytes,
     double rate,
@@ -250,6 +303,26 @@ int szfp_count_offsets_range(
 );
 
 /**
+ * @brief szfp_count_offsets_range() over the valid values only.
+ *
+ * masks holds one mask per offset, as for szfp_count_range_blocks_masked(),
+ * or is NULL for all values.
+ */
+int szfp_count_offsets_range_masked(
+    const unsigned char* buf,
+    size_t buf_size,
+    const uint64_t* offsets,
+    const uint64_t* masks,
+    size_t n,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double lo,
+    double hi,
+    size_t* out_count
+);
+
+/**
  * @brief Classify every block for lo < x <= hi and list the blocks an
  *        aggregate must read: the IN blocks as well as the MAYBE blocks.
  *
@@ -296,6 +369,36 @@ int szfp_plan_read_chunks(
 );
 
 /**
+ * @brief szfp_plan_read_chunks() for an array with missing values.
+ *
+ * nvalid and out_in_values are those of szfp_plan_range_chunks_masked().
+ */
+int szfp_plan_read_chunks_masked(
+    const unsigned char* meta,
+    size_t meta_size,
+    size_t ux,
+    size_t uy,
+    size_t uz,
+    size_t sx,
+    size_t sy,
+    size_t sz,
+    size_t blocks_per_unit,
+    double lo,
+    double hi,
+    int threads,
+    const unsigned char* nvalid,
+    uint32_t* read_chunks,
+    uint32_t* read_blocks,
+    unsigned char* read_states,
+    float* read_eps,
+    size_t read_cap,
+    size_t* out_read,
+    size_t* out_in,
+    size_t* out_out,
+    size_t* out_in_values
+);
+
+/**
  * @brief Running totals of a filtered aggregate over lo < x <= hi.
  *
  * The rec_* fields are exact for the decoded values. The other fields bound
@@ -338,6 +441,28 @@ int szfp_aggregate_offsets_range(
     const unsigned char* buf,
     size_t buf_size,
     const uint64_t* offsets,
+    const float* eps,
+    const unsigned char* in_block,
+    size_t n,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double lo,
+    double hi,
+    SzAggregate* out
+);
+
+/**
+ * @brief szfp_aggregate_offsets_range() over the valid values only.
+ *
+ * masks holds one mask per offset, as for szfp_count_range_blocks_masked(),
+ * or is NULL for all values. Missing values add to none of the totals.
+ */
+int szfp_aggregate_offsets_range_masked(
+    const unsigned char* buf,
+    size_t buf_size,
+    const uint64_t* offsets,
+    const uint64_t* masks,
     const float* eps,
     const unsigned char* in_block,
     size_t n,

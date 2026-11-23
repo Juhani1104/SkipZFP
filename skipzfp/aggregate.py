@@ -27,6 +27,7 @@ from .query import (
     QueryOptions,
     _MergedRange,
     _Range,
+    block_bits,
     chunk_coords,
     full_key,
     gap_blocks,
@@ -34,6 +35,7 @@ from .query import (
     merge_ranges,
     meta_objects,
     native,
+    need_mask,
     open_skipzfp,
     plan_meta,
     pool,
@@ -144,12 +146,14 @@ async def stream_aggregate(
     budget: ByteBudget | None = None,
     copy: bool = False,
     sem: asyncio.Semaphore | None = None,
+    masks: np.ndarray | None = None,
 ) -> tuple[list[tuple[Any, int]], int, float]:
     """Read each merged range and aggregate lo < x <= hi as soon as it arrives.
 
     It returns the totals of every read with its number of blocks, the bytes
     read, and the decode seconds summed over all reads. Pass sem to share the
-    concurrency limit with other reads.
+    concurrency limit with other reads. With masks, one per entry of blocks,
+    only the valid values count.
     """
     loop = asyncio.get_running_loop()
     sem = sem or asyncio.Semaphore(concurrency)
@@ -169,6 +173,7 @@ async def stream_aggregate(
             block_dim,
             lo,
             hi,
+            masks=None if masks is None else masks[sl],
         )
         return out, time.perf_counter() - t0
 
@@ -264,6 +269,7 @@ async def _aggregate_async(
     t0 = time.perf_counter()
 
     lt = get_layout(arr)
+    need_mask(lt)
     if opts.layer not in (None, 0) or (opts.layer is None and len(lt.layers) > 1):
         raise ValueError(
             "aggregates read layer 0 only; pass layer=0 for a layered array"
@@ -292,7 +298,7 @@ async def _aggregate_async(
 
     # 2. plan: list the IN and MAYBE blocks, with each one's error bound
     t1 = time.perf_counter()
-    chunk_ids, block_ids, states, n_in, n_out, eps = await asyncio.to_thread(
+    chunk_ids, block_ids, states, n_in, n_out, eps, *_ = await asyncio.to_thread(
         native().plan_read,
         plan_meta(meta, lt, 0),
         lt.meta_size - 4 * (len(lt.layers) - 1),
@@ -303,6 +309,7 @@ async def _aggregate_async(
         hi,
         opts.threads,
         True,
+        None if lt.mask is None else lt.mask.nvalid,
     )
     plan_sec = time.perf_counter() - t1
 
@@ -376,6 +383,7 @@ async def _read_listed(
     )
     if len(blocks) and blocks is not block_ids:
         raise RuntimeError("the planner must list blocks in chunk order")
+    masks = block_bits(lt, chunk_ids, block_ids)
     parts, payload_bytes, decode_sec = await stream_aggregate(
         store,
         merged,
@@ -392,6 +400,7 @@ async def _read_listed(
         budget,
         not opts.zero_copy,
         sem,
+        masks,
     )
     return parts, len(merged), payload_bytes, decode_sec
 
@@ -431,7 +440,7 @@ async def _aggregate_pipelined(
         u0 = i * mo.t_chunk
         n_units = min(mo.t_chunk, lt.unit_grid[0] - u0)
         t1 = time.perf_counter()
-        chunk_ids, block_ids, states, n_in, n_out, eps = await asyncio.to_thread(
+        chunk_ids, block_ids, states, n_in, n_out, eps, *_ = await asyncio.to_thread(
             native().plan_read,
             plan_meta(data[: n_units * mo.rows], lt, 0),
             meta_size,
@@ -442,6 +451,7 @@ async def _aggregate_pipelined(
             hi,
             1,  # objects are planned in parallel, one thread each
             True,
+            None if lt.mask is None else lt.mask.nvalid,
         )
         plan_sec = time.perf_counter() - t1
         chunk_ids += np.uint32(u0 // subs[0] * chunks_per_step)

@@ -51,6 +51,20 @@ static size_t count_in_range(const float* v, size_t n, double lo, double hi) {
     return c;
 }
 
+/* count_in_range over the values whose bit is set in mask, value i at bit i */
+static size_t
+count_in_range_masked(const float* v, size_t n, double lo, double hi, uint64_t mask) {
+    size_t c = 0;
+
+    if (mask == UINT64_MAX) {
+        return count_in_range(v, n, lo, hi);
+    }
+    for (size_t i = 0; i < n; i++) {
+        c += ((mask >> i) & 1u) && in_range(v[i], lo, hi);
+    }
+    return c;
+}
+
 static int block_layout(int block_dim, double rate, size_t* nval, size_t* nbytes) {
     size_t bd;
     size_t b2;
@@ -244,6 +258,7 @@ static int plan_blocks(
     double hi,
     int threads,
     int keep_in,
+    const unsigned char* nvalid,
     uint32_t* maybe_chunks,
     uint32_t* maybe_blocks,
     unsigned char* states_out,
@@ -251,7 +266,8 @@ static int plan_blocks(
     size_t maybe_cap,
     size_t* out_maybe,
     size_t* out_in,
-    size_t* out_out
+    size_t* out_out,
+    size_t* out_in_values
 ) {
     size_t gx;
     size_t gy;
@@ -264,6 +280,7 @@ static int plan_blocks(
     size_t* n_maybe_chunk;
     size_t n_in = 0;
     size_t n_out = 0;
+    size_t in_values = 0;
     int workers;
     int has_codes;
 
@@ -275,6 +292,9 @@ static int plan_blocks(
     *out_maybe = 0;
     *out_in = 0;
     *out_out = 0;
+    if (out_in_values != NULL) {
+        *out_in_values = 0;
+    }
 
     if (sx == 0 || sy == 0 || sz == 0 || ux % sx || uy % sy || uz % sz ||
         blocks_per_unit == 0 ||
@@ -315,7 +335,7 @@ static int plan_blocks(
 
     /* pass 1: classify in chunk order and count per chunk */
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : n_in, n_out) schedule(static)                   \
+#pragma omp parallel for reduction(+ : n_in, n_out, in_values) schedule(static)        \
     num_threads(workers)
 #endif
     for (size_t cid = 0; cid < n_chunk; cid++) {
@@ -335,6 +355,19 @@ static int plan_blocks(
             classify_unit(
                 meta + uid * meta_size, blocks_per_unit, has_codes, lo, hi, su
             );
+
+            /* a block with no valid value holds nothing to read or count */
+            if (nvalid != NULL) {
+                const unsigned char* nv = nvalid + (iy * uz + iz) * blocks_per_unit;
+
+                for (size_t bid = 0; bid < blocks_per_unit; bid++) {
+                    if (nv[bid] == 0) {
+                        su[bid] = 0;
+                    } else if (su[bid] == 1) {
+                        in_values += nv[bid];
+                    }
+                }
+            }
         }
 
         for (size_t b = 0; b < blocks_per_chunk; b++) {
@@ -390,10 +423,62 @@ static int plan_blocks(
     *out_maybe = n_maybe_chunk[n_chunk];
     *out_in = n_in;
     *out_out = n_out;
+    if (out_in_values != NULL) {
+        *out_in_values = nvalid != NULL ? in_values : 64u * n_in;
+    }
 
     free(states);
     free(n_maybe_chunk);
     return SZ_OK;
+}
+
+int szfp_plan_range_chunks_masked(
+    const unsigned char* meta,
+    size_t meta_size,
+    size_t ux,
+    size_t uy,
+    size_t uz,
+    size_t sx,
+    size_t sy,
+    size_t sz,
+    size_t blocks_per_unit,
+    double lo,
+    double hi,
+    int threads,
+    const unsigned char* nvalid,
+    uint32_t* maybe_chunks,
+    uint32_t* maybe_blocks,
+    size_t maybe_cap,
+    size_t* out_maybe,
+    size_t* out_in,
+    size_t* out_out,
+    size_t* out_in_values
+) {
+    return plan_blocks(
+        meta,
+        meta_size,
+        ux,
+        uy,
+        uz,
+        sx,
+        sy,
+        sz,
+        blocks_per_unit,
+        lo,
+        hi,
+        threads,
+        0,
+        nvalid,
+        maybe_chunks,
+        maybe_blocks,
+        NULL,
+        NULL,
+        maybe_cap,
+        out_maybe,
+        out_in,
+        out_out,
+        out_in_values
+    );
 }
 
 int szfp_plan_range_chunks(
@@ -416,6 +501,58 @@ int szfp_plan_range_chunks(
     size_t* out_in,
     size_t* out_out
 ) {
+    return szfp_plan_range_chunks_masked(
+        meta,
+        meta_size,
+        ux,
+        uy,
+        uz,
+        sx,
+        sy,
+        sz,
+        blocks_per_unit,
+        lo,
+        hi,
+        threads,
+        NULL,
+        maybe_chunks,
+        maybe_blocks,
+        maybe_cap,
+        out_maybe,
+        out_in,
+        out_out,
+        NULL
+    );
+}
+
+int szfp_plan_read_chunks_masked(
+    const unsigned char* meta,
+    size_t meta_size,
+    size_t ux,
+    size_t uy,
+    size_t uz,
+    size_t sx,
+    size_t sy,
+    size_t sz,
+    size_t blocks_per_unit,
+    double lo,
+    double hi,
+    int threads,
+    const unsigned char* nvalid,
+    uint32_t* read_chunks,
+    uint32_t* read_blocks,
+    unsigned char* read_states,
+    float* read_eps,
+    size_t read_cap,
+    size_t* out_read,
+    size_t* out_in,
+    size_t* out_out,
+    size_t* out_in_values
+) {
+    if (read_states == NULL) {
+        return SZ_ERR_NULL;
+    }
+
     return plan_blocks(
         meta,
         meta_size,
@@ -429,15 +566,17 @@ int szfp_plan_range_chunks(
         lo,
         hi,
         threads,
-        0,
-        maybe_chunks,
-        maybe_blocks,
-        NULL,
-        NULL,
-        maybe_cap,
-        out_maybe,
+        1,
+        nvalid,
+        read_chunks,
+        read_blocks,
+        read_states,
+        read_eps,
+        read_cap,
+        out_read,
         out_in,
-        out_out
+        out_out,
+        out_in_values
     );
 }
 
@@ -463,11 +602,7 @@ int szfp_plan_read_chunks(
     size_t* out_in,
     size_t* out_out
 ) {
-    if (read_states == NULL) {
-        return SZ_ERR_NULL;
-    }
-
-    return plan_blocks(
+    return szfp_plan_read_chunks_masked(
         meta,
         meta_size,
         ux,
@@ -480,7 +615,7 @@ int szfp_plan_read_chunks(
         lo,
         hi,
         threads,
-        1,
+        NULL,
         read_chunks,
         read_blocks,
         read_states,
@@ -488,7 +623,8 @@ int szfp_plan_read_chunks(
         read_cap,
         out_read,
         out_in,
-        out_out
+        out_out,
+        NULL
     );
 }
 
@@ -534,8 +670,9 @@ int szfp_plan_gt_chunks(
     );
 }
 
-int szfp_count_range_blocks(
+int szfp_count_range_blocks_masked(
     const unsigned char* blocks,
+    const uint64_t* masks,
     size_t block_count,
     size_t block_nbytes,
     double rate,
@@ -627,7 +764,9 @@ int szfp_count_range_blocks(
             continue;
         }
 
-        local_count = count_in_range(vals, nval, lo, hi);
+        local_count = masks != NULL
+                          ? count_in_range_masked(vals, nval, lo, hi, masks[bid])
+                          : count_in_range(vals, nval, lo, hi);
 
         count += local_count;
     }
@@ -640,6 +779,31 @@ int szfp_count_range_blocks(
 
     *out_count = count;
     return SZ_OK;
+}
+
+int szfp_count_range_blocks(
+    const unsigned char* blocks,
+    size_t block_count,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double lo,
+    double hi,
+    int threads,
+    size_t* out_count
+) {
+    return szfp_count_range_blocks_masked(
+        blocks,
+        NULL,
+        block_count,
+        block_nbytes,
+        rate,
+        block_dim,
+        lo,
+        hi,
+        threads,
+        out_count
+    );
 }
 
 int szfp_count_gt_blocks(
@@ -774,10 +938,11 @@ int szfp_merge_ranges(
     return SZ_OK;
 }
 
-int szfp_count_offsets_range(
+int szfp_count_offsets_range_masked(
     const unsigned char* buf,
     size_t buf_size,
     const uint64_t* offsets,
+    const uint64_t* masks,
     size_t n,
     size_t block_nbytes,
     double rate,
@@ -828,13 +993,18 @@ int szfp_count_offsets_range(
         float hi_f = float_at_most(hi);
 
         for (size_t i = 0; i < n; i++) {
-            count += szfp_fast_count(buf + offsets[i], block_nbytes, lo_f, hi_f);
+            count += masks != NULL
+                         ? szfp_fast_count_masked(
+                               buf + offsets[i], block_nbytes, lo_f, hi_f, masks[i]
+                           )
+                         : szfp_fast_count(buf + offsets[i], block_nbytes, lo_f, hi_f);
         }
     } else if (szfp_fast_ok(block_dim, rate, block_nbytes)) {
         for (size_t i = 0; i < n; i++) {
             szfp_fast_decode(buf + offsets[i], block_nbytes, vals);
 
-            count += count_in_range(vals, nval, lo, hi);
+            count += masks != NULL ? count_in_range_masked(vals, nval, lo, hi, masks[i])
+                                   : count_in_range(vals, nval, lo, hi);
         }
     } else {
         bitstream* stream = stream_open((void*)buf, buf_size);
@@ -856,7 +1026,8 @@ int szfp_count_offsets_range(
             stream_rseek(stream, (bitstream_offset)offsets[i] * CHAR_BIT);
             zfp_decode_block_float_3(zfp, vals);
 
-            count += count_in_range(vals, nval, lo, hi);
+            count += masks != NULL ? count_in_range_masked(vals, nval, lo, hi, masks[i])
+                                   : count_in_range(vals, nval, lo, hi);
         }
 
         zfp_stream_close(zfp);
@@ -865,6 +1036,33 @@ int szfp_count_offsets_range(
 
     *out_count = count;
     return SZ_OK;
+}
+
+int szfp_count_offsets_range(
+    const unsigned char* buf,
+    size_t buf_size,
+    const uint64_t* offsets,
+    size_t n,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double lo,
+    double hi,
+    size_t* out_count
+) {
+    return szfp_count_offsets_range_masked(
+        buf,
+        buf_size,
+        offsets,
+        NULL,
+        n,
+        block_nbytes,
+        rate,
+        block_dim,
+        lo,
+        hi,
+        out_count
+    );
 }
 
 int szfp_count_offsets(
@@ -902,12 +1100,17 @@ static void aggregate_block(
     int in_block,
     double lo,
     double hi,
+    uint64_t mask,
     SzAggregate* acc
 ) {
     for (size_t i = 0; i < n; i++) {
         double r = (double)v[i];
         double a = r - eps;
         double b = r + eps;
+
+        if (!((mask >> i) & 1u)) { /* a missing value */
+            continue;
+        }
 
         acc->abs_total += fabs(r) + eps;
 
@@ -939,10 +1142,11 @@ static void aggregate_block(
     }
 }
 
-int szfp_aggregate_offsets_range(
+int szfp_aggregate_offsets_range_masked(
     const unsigned char* buf,
     size_t buf_size,
     const uint64_t* offsets,
+    const uint64_t* masks,
     const float* eps,
     const unsigned char* in_block,
     size_t n,
@@ -994,7 +1198,16 @@ int szfp_aggregate_offsets_range(
     if (szfp_fast_ok(block_dim, rate, block_nbytes)) {
         for (size_t i = 0; i < n; i++) {
             szfp_fast_decode(buf + offsets[i], block_nbytes, vals);
-            aggregate_block(vals, nval, (double)eps[i], in_block[i] != 0, lo, hi, out);
+            aggregate_block(
+                vals,
+                nval,
+                (double)eps[i],
+                in_block[i] != 0,
+                lo,
+                hi,
+                masks != NULL ? masks[i] : UINT64_MAX,
+                out
+            );
         }
     } else {
         bitstream* stream = stream_open((void*)buf, buf_size);
@@ -1015,7 +1228,16 @@ int szfp_aggregate_offsets_range(
         for (size_t i = 0; i < n; i++) {
             stream_rseek(stream, (bitstream_offset)offsets[i] * CHAR_BIT);
             zfp_decode_block_float_3(zfp, vals);
-            aggregate_block(vals, nval, (double)eps[i], in_block[i] != 0, lo, hi, out);
+            aggregate_block(
+                vals,
+                nval,
+                (double)eps[i],
+                in_block[i] != 0,
+                lo,
+                hi,
+                masks != NULL ? masks[i] : UINT64_MAX,
+                out
+            );
         }
 
         zfp_stream_close(zfp);
@@ -1023,4 +1245,35 @@ int szfp_aggregate_offsets_range(
     }
 
     return SZ_OK;
+}
+
+int szfp_aggregate_offsets_range(
+    const unsigned char* buf,
+    size_t buf_size,
+    const uint64_t* offsets,
+    const float* eps,
+    const unsigned char* in_block,
+    size_t n,
+    size_t block_nbytes,
+    double rate,
+    int block_dim,
+    double lo,
+    double hi,
+    SzAggregate* out
+) {
+    return szfp_aggregate_offsets_range_masked(
+        buf,
+        buf_size,
+        offsets,
+        NULL,
+        eps,
+        in_block,
+        n,
+        block_nbytes,
+        rate,
+        block_dim,
+        lo,
+        hi,
+        out
+    );
 }
